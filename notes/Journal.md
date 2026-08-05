@@ -1,18 +1,51 @@
 # Formation Agent IA
 
-## Jour 1
+VS Code
+L'environnement où tu travailles.
 
-Objectif :
-Comprendre comment travaillent les développeurs utilisant des agents IA.
+Terminal
+Le moyen de parler directement au système.
 
-Notions apprises :
-- Un développeur moderne orchestre des outils et des IA.
-- VS Code est l'atelier.
-- Git mémorise les modifications.
-- GitHub sauvegarde et partage les projets.
-- Python sert à l'automatisation et aux agents.
-- Docker isole les applications.
-- Ollama permet d'utiliser des modèles IA en local.
+Git
+L'historique de ton projet.
 
-Questions :
-...
+GitHub
+La sauvegarde et le partage des projets.
+
+Repository (Repo)
+Un projet Git.
+Ton dossier Agent-OS est un repository.
+
+Commit
+Une photographie de ton projet à un instant donné.
+
+Branch
+Une version parallèle du projet.
+Nous utiliserons beaucoup les branches plus tard.
+
+Docker Image
+Le modèle de départ.
+Comme un plan de construction.
+
+Docker Container
+Une instance en cours d'exécution d'une image.
+
+WSL
+Linux qui fonctionne à l'intérieur de Windows.
+
+Les commandes à connaître par cœur
+Git :
+git status
+git add .
+git commit -m "..."
+git push
+git pull
+
+Python :
+python --version
+
+Docker :
+docker ps
+docker ps -a
+docker images
+docker run hello-world
