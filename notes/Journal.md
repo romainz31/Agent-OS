@@ -36,9 +36,9 @@ Linux qui fonctionne à l'intérieur de Windows.
 Les commandes à connaître par cœur
 Git :
 git status
-git add .
-git commit -m "..."
-git push
+git add . (préparé pour la sauvegarde)
+git commit -m "..."  (-m pour modifier le nom)
+git push (envoyer la version)
 git pull
 
 Python :
