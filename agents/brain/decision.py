@@ -1,18 +1,28 @@
+import json
+
+
 def analyze_response(response):
 
-    response = response.lower()
+    try:
+        data = json.loads(response)
 
-    if "addition" in response or "calcul" in response:
+    except json.JSONDecodeError:
         return {
-    "action": "tool",
-    "tool": "addition",
-    "arguments": {
-        "a": 5,
-        "b": 3
-    }
-}
+            "action": "answer",
+            "content": response
+        }
+
+
+    if "tool" in data:
+
+        return {
+            "action": "tool",
+            "tool": data["tool"],
+            "arguments": data.get("arguments", {})
+        }
+
 
     return {
         "action": "answer",
-        "content": response
+        "content": data.get("content", response)
     }
