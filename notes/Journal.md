@@ -1,36 +1,36 @@
 # Formation Agent IA
 
-VS Code
+VS Code :
 L'environnement où tu travailles.
 
-Terminal
+Terminal :
 Le moyen de parler directement au système.
 
-Git
+Git :
 L'historique de ton projet.
 
-GitHub
+GitHub :
 La sauvegarde et le partage des projets.
 
-Repository (Repo)
+Repository (Repo) :
 Un projet Git.
 Ton dossier Agent-OS est un repository.
 
-Commit
+Commit :
 Une photographie de ton projet à un instant donné.
 
-Branch
+Branch :
 Une version parallèle du projet.
 Nous utiliserons beaucoup les branches plus tard.
 
-Docker Image
+Docker Image :
 Le modèle de départ.
 Comme un plan de construction.
 
-Docker Container
+Docker Container :
 Une instance en cours d'exécution d'une image.
 
-WSL
+WSL :
 Linux qui fonctionne à l'intérieur de Windows.
 
 Les commandes à connaître par cœur
@@ -44,7 +44,7 @@ git pull
 Python :
 python --version
 
-Docker :
+Docker : 
 docker ps
 docker ps -a
 docker images
