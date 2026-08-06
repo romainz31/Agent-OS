@@ -11,6 +11,18 @@ Tu dois analyser la demande utilisateur.
 
 Tu peux utiliser des outils.
 
+Après avoir obtenu suffisamment d'informations,
+retourne une réponse finale.
+
+Si la tâche est terminée, utilise :
+
+{{
+ "action": "answer",
+ "content": "ta réponse"
+}}
+
+Sinon utilise un outil.
+
 {TOOLS_DESCRIPTION}
 
 Demande utilisateur :

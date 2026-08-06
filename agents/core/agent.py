@@ -4,15 +4,16 @@ from agents.tools.registry import TOOLS
 
 
 def run_agent(objective):
-    print("VERSION NOUVELLE AGENT")
-
     print("Objectif :", objective)
 
     completed = False
+    history = []
 
     while not completed:
 
-        response = ask_llm(objective)
+        response = ask_llm(
+    objective + "\nHistorique :\n" + str(history)
+)
 
         print("\nLLM :")
         print(response)
@@ -37,8 +38,14 @@ def run_agent(objective):
             )
 
             print("\nRésultat outil :", result)
+            history.append(
+    {
+        "tool": tool_name,
+        "result": result
+    }
+)
 
-            completed = True
+            
 
 
         elif decision["action"] == "answer":
