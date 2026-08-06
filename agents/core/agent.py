@@ -1,6 +1,6 @@
 from agents.brain.llm import ask_llm
 from agents.brain.decision import analyze_response
-from agents.tools.registry import TOOLS
+from agents.executor.executor import execute
 
 
 def run_agent(objective):
@@ -26,27 +26,15 @@ def run_agent(objective):
 
         if decision["action"] == "tool":
 
-            tool_name = decision["tool"]
-
-            tool = TOOLS[tool_name]
-
-            arguments = decision["arguments"]
-
-            result = tool(
-                arguments["a"],
-                arguments["b"]
-            )
+            result = execute(decision)
 
             print("\nRésultat outil :", result)
             history.append(
     {
-        "tool": tool_name,
+        "tool": decision["tool"],
         "result": result
     }
 )
-
-            
-
 
         elif decision["action"] == "answer":
 
