@@ -1,40 +1,26 @@
 from agents.brain.llm import ask_llm
-from agents.brain.decision import analyze_response
-from agents.executor.executor import execute
 
 
-def run_agent(objective):
-    print("Objectif :", objective)
+class Agent:
 
-    completed = False
-    history = []
+    def __init__(self, name, role):
+        self.name = name
+        self.role = role
 
-    while not completed:
+    def run(self, task):
 
-        response = ask_llm(
-    objective + "\nHistorique :\n" + str(history)
-)
+        prompt = f"""
+Tu es l'agent {self.name}.
 
-        print("\nLLM :")
-        print(response)
+Ton rôle :
+{self.role}
 
-        decision = analyze_response(response)
+Tâche :
+{task}
 
-        print("\nDécision :")
-        print(decision)
+Réponds en respectant strictement ton rôle.
+"""
 
+        response = ask_llm(prompt)
 
-        if decision["action"] == "tool":
-
-            result = execute(decision)
-
-            print("\nRésultat outil :", result)
-            history.append(
-    f"L'outil {decision['tool']} a retourné le résultat : {result}"
-)
-
-        elif decision["action"] == "answer":
-
-            print("\nRéponse finale :", decision["content"])
-
-            completed = True
+        return response
