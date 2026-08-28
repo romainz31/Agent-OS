@@ -5,13 +5,17 @@ def execute(decision):
 
     tool_name = decision["tool"]
 
+    if tool_name not in TOOLS:
+        return f"Outil inconnu : {tool_name}"
+
     tool = TOOLS[tool_name]
 
-    arguments = decision["arguments"]
+    arguments = decision.get("arguments", {})
 
-    result = tool(
-        arguments["a"],
-        arguments["b"]
-    )
+    try:
+        result = tool(**arguments)
 
-    return result
+        return result
+
+    except Exception as e:
+        return f"Erreur lors de l'exécution de {tool_name} : {e}"

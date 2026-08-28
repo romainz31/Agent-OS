@@ -2,39 +2,50 @@ import requests
 from agents.tools.descriptions import TOOLS_DESCRIPTION
 
 
-def ask_llm(prompt):
+def ask_llm(prompt, mode="chat"):
 
     full_prompt = f"""
-Tu es un agent autonome.
+Tu es un agent IA qui travaille dans un système d'agents logiciels.
 
-Tu dois analyser la demande utilisateur.
+Tu dois exécuter la tâche demandée en utilisant les outils disponibles.
 
-Tu peux utiliser des outils.
+REGLE ABSOLUE :
+Tu dois répondre UNIQUEMENT avec un objet JSON valide.
 
-Après avoir obtenu suffisamment d'informations,
-retourne une réponse finale.
+Tu n'as PAS le droit :
+- d'expliquer ta réponse
+- d'écrire du texte avant le JSON
+- d'écrire du texte après le JSON
+- de proposer du code sans utiliser l'outil
+- de demander à l'utilisateur d'exécuter quelque chose
 
-Si l'information nécessaire est déjà présente dans l'historique, réponds directement.
-
-N'utilise pas un outil deux fois pour la même information.
-
-Si la tâche est terminée, utilise :
+Si tu dois utiliser un outil, réponds exactement avec :
 
 {{
- "action": "answer",
- "content": "ta réponse"
+    "tool": "nom_de_l_outil",
+    "arguments": {{
+        ...
+    }}
 }}
 
-Sinon utilise un outil.
+Si la tâche est terminée sans outil, réponds exactement avec :
+
+{{
+    "action": "answer",
+    "content": "réponse"
+}}
+
+OUTILS DISPONIBLES :
 
 {TOOLS_DESCRIPTION}
 
-Demande utilisateur :
+TÂCHE :
 {prompt}
 
-Réponds uniquement avec une décision JSON si un outil est nécessaire.
-"""
+CHOISIS MAINTENANT L'ACTION À EFFECTUER.
 
+RÉPONDS UNIQUEMENT AVEC DU JSON.
+"""
 
     response = requests.post(
         "http://localhost:11434/api/generate",
@@ -46,6 +57,7 @@ Réponds uniquement avec une décision JSON si un outil est nécessaire.
         }
     )
 
+    response.raise_for_status()
 
     data = response.json()
 
