@@ -14,6 +14,10 @@ Tu peux utiliser des outils.
 Après avoir obtenu suffisamment d'informations,
 retourne une réponse finale.
 
+Si l'information nécessaire est déjà présente dans l'historique, réponds directement.
+
+N'utilise pas un outil deux fois pour la même information.
+
 Si la tâche est terminée, utilise :
 
 {{

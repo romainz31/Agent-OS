@@ -30,10 +30,7 @@ def run_agent(objective):
 
             print("\nRésultat outil :", result)
             history.append(
-    {
-        "tool": decision["tool"],
-        "result": result
-    }
+    f"L'outil {decision['tool']} a retourné le résultat : {result}"
 )
 
         elif decision["action"] == "answer":
