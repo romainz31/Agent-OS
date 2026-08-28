@@ -15,99 +15,96 @@ class Orchestrator:
         print("                 ORCHESTRATOR")
         print("=" * 60)
 
-        print()
-        print("OBJECTIF :")
-        print(objective)
+        print(f"\nOBJECTIF : {objective}")
 
         # =====================================================
         # 1. PLANNER
         # =====================================================
 
-        print()
-        print("=" * 60)
-        print("                    PLANNER")
-        print("=" * 60)
+        print("\n[1/3] PLANNER")
 
         plan = self.planner.run(objective)
 
-        print()
-        print("PLAN DU PLANNER :")
+        print("\nPLAN :")
         print(plan)
 
         # =====================================================
         # 2. DEVELOPER
         # =====================================================
 
-        print()
-        print("=" * 60)
-        print("                   DEVELOPER")
-        print("=" * 60)
+        print("\n[2/3] DEVELOPER")
 
         developer_task = f"""
 Objectif :
 
 {objective}
 
-Plan du Planner :
+Plan fourni par le Planner :
 
 {plan}
 
-Tu es maintenant chargé de réaliser ce plan.
-Crée le programme nécessaire et vérifie qu'il fonctionne.
+Réalise maintenant le plan.
+Crée le programme nécessaire.
+Teste ton programme avant de terminer.
+
+IMPORTANT :
+Lorsque tu crées un fichier, indique clairement son chemin.
 """
 
         developer_result = self.developer.run(developer_task)
 
-        print()
-        print("RÉSULTAT DU DEVELOPER :")
+        print("\nRÉSULTAT :")
         print(developer_result)
 
         # =====================================================
         # 3. TESTER
         # =====================================================
 
-        print()
-        print("=" * 60)
-        print("                    TESTER")
-        print("=" * 60)
+        print("\n[3/3] TESTER")
 
         tester_task = f"""
-Objectif initial :
+Objectif :
 
 {objective}
 
-Le Developer vient de travailler sur le projet.
-
-Résultat du Developer :
+Travail réalisé par le Developer :
 
 {developer_result}
 
-Teste le programme créé par le Developer.
-Vérifie qu'il fonctionne correctement et que l'objectif
-initial est respecté.
+Tu dois maintenant tester le programme créé par le Developer.
 
-Si le test réussit, indique clairement PASS.
-Si le test échoue, indique clairement FAIL et explique
-le problème.
+Commence par identifier le fichier réellement créé par le
+Developer.
+
+Lis ce fichier puis exécute-le.
+
+Vérifie que le résultat correspond bien à l'objectif.
+
+Si le programme fonctionne :
+réponds exactement avec :
+
+PASS
+
+Si le programme ne fonctionne pas :
+réponds avec :
+
+FAIL
+
+puis explique brièvement pourquoi.
 """
 
         tester_result = self.tester.run(tester_task)
 
-        print()
-        print("RÉSULTAT DU TESTER :")
+        print("\nRÉSULTAT DU TEST :")
         print(tester_result)
 
         # =====================================================
-        # 4. RESULTAT FINAL
+        # RESULTAT FINAL
         # =====================================================
 
         print()
         print("=" * 60)
-        print("                 FIN DU PROCESSUS")
+        print("                 TERMINÉ")
         print("=" * 60)
-
-        print()
-        print("Résultat final :")
-        print(tester_result)
 
         return tester_result
