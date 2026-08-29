@@ -6,7 +6,11 @@ def execute(decision):
     tool_name = decision["tool"]
 
     if tool_name not in TOOLS:
-        return f"Outil inconnu : {tool_name}"
+        return {
+            "success": False,
+            "output": "",
+            "error": f"Outil inconnu : {tool_name}"
+        }
 
     tool = TOOLS[tool_name]
 
@@ -14,8 +18,11 @@ def execute(decision):
 
     try:
         result = tool(**arguments)
-
         return result
 
     except Exception as e:
-        return f"Erreur lors de l'exécution de {tool_name} : {e}"
+        return {
+            "success": False,
+            "output": "",
+            "error": f"Erreur lors de l'exécution de {tool_name} : {e}"
+        }

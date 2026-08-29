@@ -4,7 +4,7 @@ from agents.executor.executor import execute
 decision = {
     "tool": "run_python",
     "arguments": {
-        "path": "applications/test_execution.py"
+        "file_path": "applications/test_execution.py"
     }
 }
 

@@ -1,28 +1,40 @@
 import json
+import re
 
 
 def analyze_response(response):
 
+    if not response:
+        return None
+
+    response = response.strip()
+
+    # ==================================================
+    # JSON DIRECT
+    # ==================================================
+
     try:
-        data = json.loads(response)
+        return json.loads(response)
 
     except json.JSONDecodeError:
-        return {
-            "action": "answer",
-            "content": response
-        }
+        pass
 
+    # ==================================================
+    # JSON DANS DU TEXTE
+    # ==================================================
 
-    if "tool" in data:
+    matches = re.findall(
+        r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}",
+        response,
+        re.DOTALL
+    )
 
-        return {
-            "action": "tool",
-            "tool": data["tool"],
-            "arguments": data.get("arguments", {})
-        }
+    for match in matches:
 
+        try:
+            return json.loads(match)
 
-    return {
-        "action": "answer",
-        "content": data.get("content", response)
-    }
+        except json.JSONDecodeError:
+            continue
+
+    return None

@@ -1,6 +1,5 @@
-import json
-
 from agents.brain.llm import ask_llm
+from agents.brain.decision import analyze_response
 from agents.executor.executor import execute
 
 
@@ -11,304 +10,206 @@ class Agent:
         self.role = role
         self.allowed_tools = allowed_tools or []
 
-    def run(self, task):
+    def run(self, task, max_steps=8):
 
-        prompt = f"""
+        history = []
+
+        system_prompt = f"""
 Tu es l'agent {self.name}.
 
-Ton rôle :
+ROLE :
 {self.role}
 
-Tâche :
-{task}
-
-Outils autorisés :
+OUTILS AUTORISÉS :
 {self.allowed_tools}
 
-RÈGLES STRICTES :
+RÈGLES :
 
-1. Travaille étape par étape.
-2. N'utilise que les outils autorisés.
-3. Ne répète jamais exactement la même action.
-4. Après chaque outil, analyse son résultat.
-5. Si une action réussit et que la tâche est terminée, arrête-toi.
-6. Si une erreur apparaît, corrige-la puis reteste.
-7. Pour utiliser un outil, réponds UNIQUEMENT avec un JSON valide.
-8. Quand la tâche est terminée, réponds normalement.
-9. Ne réécris jamais un fichier identique sans raison.
-10. Ne lance pas plusieurs fois inutilement le même programme.
-
-IMPORTANT :
-
-Si tu crées un fichier Python avec write_file, le contenu doit être
-du vrai code Python.
-
-Dans le JSON, utilise \\n pour représenter les retours à la ligne.
-
-Exemple :
-
-{{
-    "tool": "write_file",
-    "arguments": {{
-        "file_path": "applications/test.py",
-        "content": "def multiply(a, b):\\n    return a * b\\n\\nprint(multiply(6, 7))"
-    }}
-}}
+1. Utilise uniquement les outils autorisés.
+2. Respecte strictement ton rôle.
+3. Ne fais jamais le travail d'un autre agent.
+4. Si un outil échoue, analyse l'erreur.
+5. Après une erreur, tu peux réessayer.
+6. Ne répète jamais exactement la même action si son résultat n'a pas changé.
+7. Une exécution Python réussie ne signifie PAS automatiquement que la tâche est terminée.
+8. Lorsque ton travail est terminé, retourne uniquement un JSON final.
 """
 
-        max_steps = 8
-
-        executed_actions = []
-
-        for step in range(max_steps):
+        for step in range(1, max_steps + 1):
 
             print()
             print("=" * 60)
-            print(f"ÉTAPE {step + 1}/{max_steps}")
+            print(f"ÉTAPE {step}/{max_steps}")
             print("=" * 60)
 
-            response = ask_llm(prompt, mode="chat")
+            prompt = f"""
+{system_prompt}
+
+TÂCHE :
+
+{task}
+
+HISTORIQUE DES ACTIONS :
+
+{history}
+
+============================================================
+
+Décide maintenant de l'action suivante.
+
+SI TU DOIS UTILISER UN OUTIL :
+
+Retourne UNIQUEMENT :
+
+{{
+    "tool": "nom_outil",
+    "arguments": {{
+        "argument": "valeur"
+    }}
+}}
+
+SI TON TRAVAIL EST TERMINÉ :
+
+Retourne UNIQUEMENT un JSON final adapté à ton rôle.
+
+NE RETOURNE PAS DE TEXTE EN DEHORS DU JSON.
+"""
+
+            response = ask_llm(prompt)
 
             print()
             print("RÉPONSE DU LLM :")
             print(response)
 
-            # ==================================================
-            # RÉPONSE NORMALE DU LLM
-            # ==================================================
+            decision = analyze_response(response)
 
-            try:
-                decision = json.loads(response)
+            # --------------------------------------------------
+            # Réponse invalide
+            # --------------------------------------------------
 
-            except json.JSONDecodeError:
+            if not isinstance(decision, dict):
 
                 print()
-                print("============================================================")
-                print("RÉPONSE FINALE")
-                print("============================================================")
-                print(response)
+                print("⚠️ Réponse JSON invalide.")
 
-                return response
+                history.append({
+                    "type": "llm_error",
+                    "response": response
+                })
 
-            # ==================================================
-            # PAS D'OUTIL
-            # ==================================================
+                continue
+
+            # --------------------------------------------------
+            # RÉPONSE FINALE
+            # --------------------------------------------------
 
             if "tool" not in decision:
 
                 print()
-                print("============================================================")
+                print("=" * 60)
                 print("RÉPONSE FINALE")
-                print("============================================================")
-                print(response)
+                print("=" * 60)
+                print(decision)
 
-                return response
+                return decision
 
-            tool_name = decision["tool"]
+            # --------------------------------------------------
+            # ACTION OUTIL
+            # --------------------------------------------------
+
+            tool = decision.get("tool")
             arguments = decision.get("arguments", {})
 
-            print()
-            print("[AGENT] → Outil :", tool_name)
+            # --------------------------------------------------
+            # Vérification outil autorisé
+            # --------------------------------------------------
 
-            # ==================================================
-            # SÉCURITÉ : OUTIL AUTORISÉ ?
-            # ==================================================
+            if tool not in self.allowed_tools:
 
-            if tool_name not in self.allowed_tools:
-
-                result = (
-                    f"ERREUR : l'agent {self.name} "
-                    f"n'est pas autorisé à utiliser l'outil "
-                    f"{tool_name}."
-                )
+                error = f"Outil non autorisé : {tool}"
 
                 print()
-                print("RÉSULTAT OUTIL :")
-                print(result)
+                print("ERREUR :", error)
 
-                prompt = f"""
-La tentative précédente a échoué.
-
-Erreur :
-{result}
-
-Tâche :
-{task}
-
-Outils autorisés :
-{self.allowed_tools}
-
-Choisis maintenant une action différente et autorisée.
-
-Si la tâche est terminée, réponds normalement.
-"""
+                history.append({
+                    "tool": tool,
+                    "arguments": arguments,
+                    "result": {
+                        "success": False,
+                        "error": error
+                    }
+                })
 
                 continue
 
-            # ==================================================
-            # IDENTIFICATION DE L'ACTION
-            # ==================================================
+            # --------------------------------------------------
+            # Détection des actions identiques
+            # --------------------------------------------------
 
-            action_key = (
-                tool_name,
-                json.dumps(
-                    arguments,
-                    sort_keys=True,
-                    ensure_ascii=False
-                )
-            )
+            action = {
+                "tool": tool,
+                "arguments": arguments
+            }
 
-            # ==================================================
-            # DÉTECTION DES RÉPÉTITIONS
-            # ==================================================
-
-            if action_key in executed_actions:
-
-                print()
-                print("⚠️ ACTION DÉJÀ EXÉCUTÉE")
-                print("Outil :", tool_name)
-                print("Arguments :", arguments)
-                print("→ Exécution ignorée.")
-
-                # Si le LLM insiste malgré tout,
-                # on lui donne une dernière instruction claire.
-
-                prompt = f"""
-Tu répètes exactement la même action.
-
-Action déjà exécutée :
-{json.dumps(decision, ensure_ascii=False)}
-
-Tu dois maintenant faire l'une des deux choses suivantes :
-
-1. utiliser un AUTRE outil autorisé pour poursuivre ;
-2. terminer la tâche avec une réponse normale.
-
-NE répète PAS cette action.
-
-Tâche :
-{task}
-
-Outils autorisés :
-{self.allowed_tools}
-"""
-
-                continue
-
-            executed_actions.append(action_key)
-
-            # ==================================================
-            # EXÉCUTION
-            # ==================================================
-
-            try:
-
-                result = execute(decision)
-
-            except Exception as e:
-
-                result = {
-                    "success": False,
-                    "output": "",
-                    "error": str(e)
+            previous_actions = [
+                {
+                    "tool": item.get("tool"),
+                    "arguments": item.get("arguments")
                 }
+                for item in history
+                if "tool" in item
+            ]
+
+            if action in previous_actions:
+
+                print()
+                print("⚠️ Action répétée inutilement.")
+                print("Le LLM doit choisir une autre action.")
+
+                history.append({
+                    "type": "repeated_action",
+                    "action": action
+                })
+
+                continue
+
+            # --------------------------------------------------
+            # EXÉCUTION
+            # --------------------------------------------------
+
+            print()
+            print(f"[AGENT] → Outil : {tool}")
+
+            result = execute({
+                "tool": tool,
+                "arguments": arguments
+            })
 
             print()
             print("RÉSULTAT OUTIL :")
             print(result)
 
-            # ==================================================
-            # RÈGLE IMPORTANTE :
-            #
-            # run_python réussi = programme exécuté correctement
-            # ==================================================
+            # --------------------------------------------------
+            # HISTORIQUE
+            # --------------------------------------------------
 
-            if tool_name == "run_python":
+            history.append({
+                "tool": tool,
+                "arguments": arguments,
+                "result": result
+            })
 
-                if isinstance(result, dict):
-
-                    success = result.get("success", False)
-
-                    if success:
-
-                        output = result.get("output", "").strip()
-
-                        print()
-                        print("=" * 60)
-                        print("✅ TÂCHE TERMINÉE")
-                        print("=" * 60)
-
-                        if output:
-
-                            print(
-                                f"Le programme a été exécuté "
-                                f"avec succès.\nRésultat : {output}"
-                            )
-
-                        else:
-
-                            print(
-                                "Le programme a été exécuté "
-                                "avec succès."
-                            )
-
-                        return (
-                            "Tâche terminée avec succès. "
-                            f"Résultat : {output}"
-                            if output
-                            else
-                            "Tâche terminée avec succès."
-                        )
-
-            # ==================================================
-            # PRÉPARATION DU PROCHAIN TOUR
-            # ==================================================
-
-            prompt = f"""
-Tu es l'agent {self.name}.
-
-Ton rôle :
-{self.role}
-
-Tâche initiale :
-{task}
-
-Outils autorisés :
-{self.allowed_tools}
-
-Tu viens d'utiliser cet outil :
-
-{json.dumps(decision, ensure_ascii=False, indent=4)}
-
-Résultat :
-
-{result}
-
-Analyse maintenant le résultat.
-
-RÈGLES :
-
-- Si une erreur est présente, corrige-la.
-- Si le fichier doit être modifié, utilise write_file.
-- Si le programme doit être testé, utilise run_python.
-- Ne répète jamais exactement la même action.
-- Ne réécris pas un fichier identique sans raison.
-- Si la tâche est terminée, réponds normalement.
-- Si tu utilises un outil, réponds UNIQUEMENT avec un JSON valide.
-"""
-
-        # ======================================================
+        # ------------------------------------------------------
         # LIMITE
-        # ======================================================
+        # ------------------------------------------------------
 
         print()
         print("⚠️ Nombre maximum d'étapes atteint.")
-        print(
-            f"La tâche n'a pas pu être terminée "
-            f"dans la limite de {max_steps} étapes."
-        )
 
-        return (
-            f"La tâche n'a pas pu être terminée "
-            f"dans la limite de {max_steps} étapes."
-        )
+        return {
+            "status": "FAIL",
+            "message": (
+                f"La tâche n'a pas pu être terminée "
+                f"dans la limite de {max_steps} étapes."
+            )
+        }

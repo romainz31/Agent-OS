@@ -4,7 +4,7 @@ from agents.executor.executor import execute
 decision = {
     "tool": "read_file",
     "arguments": {
-        "path": "data/test_agent.txt"
+        "file_path": "data/test_agent.txt"
     }
 }
 
