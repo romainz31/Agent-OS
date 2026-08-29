@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Agent-OS</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <div class="app">
+
+        <aside class="sidebar">
+
+            <h1>Agent-OS</h1>
+
+            <label for="agent-select">Agent</label>
+            <select id="agent-select">
+                {% for agent in agents %}
+                <option value="{{ agent }}">{{ agent | capitalize }}</option>
+                {% endfor %}
+            </select>
+
+            <label class="checkbox-row">
+                <input type="checkbox" id="shared-toggle">
+                Projet de groupe (mémoire partagée)
+            </label>
+
+            <p class="hint">
+                En mode "projet de groupe", cet agent voit les
+                messages échangés par les autres agents dans la
+                même mémoire partagée, et y ajoute les siens.
+            </p>
+
+        </aside>
+
+        <main class="chat">
+
+            <div id="messages" class="messages"></div>
+
+            <form id="chat-form" class="chat-form">
+                <textarea
+                    id="message-input"
+                    placeholder="Écris une tâche pour l'agent..."
+                    rows="2"
+                ></textarea>
+                <button type="submit" id="send-button">Envoyer</button>
+            </form>
+
+        </main>
+
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

@@ -3,10 +3,6 @@ def divide():
         result = 10 / 0
         print(result)
     except ZeroDivisionError as e:
-        print(e)
+        print('Une division par zéro a été détectée.')
 
-if __name__ == '__main__':
-    divide()
-
-import sys
-sys.stderr.write('') # Éviter la création de l'erreur.log
+divide()

@@ -1,6 +1,13 @@
 from agents.brain.llm import ask_llm
 from agents.brain.decision import analyze_response
 from agents.executor.executor import execute
+from agents.core.memory_store import (
+    load_agent_memory,
+    append_agent_memory,
+    load_shared_memory,
+    append_shared_memory,
+    format_history
+)
 
 
 class Agent:
@@ -9,6 +16,84 @@ class Agent:
         self.name = name
         self.role = role
         self.allowed_tools = allowed_tools or []
+
+    # ========================================================
+    # CHAT : point d'entrée conversationnel (mémoire incluse)
+    # ========================================================
+    #
+    # Contrairement à run(), qui exécute une tâche ponctuelle
+    # sans se souvenir de rien d'un appel à l'autre, chat() est
+    # destiné à l'interface : il conserve une mémoire propre à
+    # l'agent, et peut aussi lire/écrire dans une mémoire
+    # partagée entre agents pour les projets de groupe.
+
+    def chat(self, message, shared=False, max_steps=8):
+
+        individual_history = load_agent_memory(self.name)
+
+        context_sections = [
+            "HISTORIQUE DE CONVERSATION AVEC CET AGENT "
+            "(du plus ancien au plus récent) :",
+            format_history(individual_history)
+        ]
+
+        if shared:
+
+            shared_history = load_shared_memory()
+
+            context_sections += [
+                "",
+                "MÉMOIRE PARTAGÉE DU PROJET DE GROUPE "
+                "(échanges d'autres agents et de l'utilisateur) :",
+                format_history(shared_history)
+            ]
+
+        task_with_context = f"""
+{chr(10).join(context_sections)}
+
+============================================================
+
+NOUVEAU MESSAGE DE L'UTILISATEUR :
+
+{message}
+"""
+
+        result = self.run(task_with_context, max_steps=max_steps)
+
+        response_text = self.stringify_result(result)
+
+        append_agent_memory(self.name, "user", message)
+        append_agent_memory(self.name, "agent", response_text)
+
+        if shared:
+
+            append_shared_memory(self.name, "user", message)
+            append_shared_memory(self.name, "agent", response_text)
+
+        return result
+
+    @staticmethod
+    def stringify_result(result):
+        """
+        Convertit le résultat renvoyé par run() (dict ou str)
+        en texte lisible, pour l'affichage dans le chat et le
+        stockage en mémoire.
+        """
+
+        if isinstance(result, dict):
+
+            message = result.get("message")
+            status = result.get("status")
+
+            if message and status:
+                return f"[{status}] {message}"
+
+            if message:
+                return message
+
+            return str(result)
+
+        return str(result)
 
     def run(self, task, max_steps=8):
 
@@ -151,16 +236,81 @@ NE RETOURNE PAS DE TEXTE EN DEHORS DU JSON.
                 "arguments": arguments
             }
 
+            previous_tool_entries = [
+                item for item in history if "tool" in item
+            ]
+
             previous_actions = [
                 {
                     "tool": item.get("tool"),
                     "arguments": item.get("arguments")
                 }
-                for item in history
-                if "tool" in item
+                for item in previous_tool_entries
             ]
 
             if action in previous_actions:
+
+                # Résultat obtenu la ou les fois précédentes où
+                # cette action identique a été exécutée.
+                last_result = next(
+                    (
+                        item.get("result")
+                        for item in reversed(previous_tool_entries)
+                        if item.get("tool") == tool
+                        and item.get("arguments") == arguments
+                    ),
+                    None
+                )
+
+                # Nombre de fois où cette action a déjà été
+                # bloquée pour répétition (pas exécutée, juste
+                # proposée à nouveau).
+                repeat_count = sum(
+                    1
+                    for item in history
+                    if item.get("type") == "repeated_action"
+                    and item.get("action") == action
+                )
+
+                if repeat_count >= 1:
+
+                    # ------------------------------------------
+                    # DISJONCTEUR
+                    #
+                    # Le LLM a déjà été prévenu une fois et
+                    # persiste à proposer exactement la même
+                    # action. Un modèle local de petite taille
+                    # peut rester bloqué indéfiniment dans ce
+                    # cas : on arrête nous-mêmes la boucle plutôt
+                    # que de consommer les étapes restantes pour
+                    # rien.
+                    # ------------------------------------------
+
+                    print()
+                    print("⛔ Boucle détectée : action identique proposée")
+                    print("   plusieurs fois malgré l'avertissement.")
+                    print("   Arrêt automatique de l'agent.")
+
+                    success = (
+                        isinstance(last_result, dict)
+                        and last_result.get("success", True) is not False
+                        and not last_result.get("error")
+                    ) or (
+                        isinstance(last_result, str)
+                        and "erreur" not in last_result.lower()
+                        and "error" not in last_result.lower()
+                    )
+
+                    return {
+                        "status": "DONE" if success else "FAIL",
+                        "message": (
+                            "Travail arrêté automatiquement après "
+                            "détection d'une boucle (action répétée "
+                            "sans progrès)."
+                        ),
+                        "last_action": action,
+                        "last_result": last_result
+                    }
 
                 print()
                 print("⚠️ Action répétée inutilement.")
@@ -168,7 +318,16 @@ NE RETOURNE PAS DE TEXTE EN DEHORS DU JSON.
 
                 history.append({
                     "type": "repeated_action",
-                    "action": action
+                    "action": action,
+                    "previous_result": last_result,
+                    "instruction": (
+                        "Cette action a déjà été exécutée avec le "
+                        "résultat indiqué ci-dessus. Ne la répète "
+                        "surtout pas. Si ce résultat est un succès, "
+                        "termine maintenant en renvoyant le JSON "
+                        "final. Sinon, choisis un outil ou des "
+                        "arguments réellement différents."
+                    )
                 })
 
                 continue
