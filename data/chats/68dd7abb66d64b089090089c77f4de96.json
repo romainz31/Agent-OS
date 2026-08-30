@@ -1,0 +1,23 @@
+{
+    "id": "68dd7abb66d64b089090089c77f4de96",
+    "title": "Analyse cette page et mémorise les infor...",
+    "agents": [
+        "researcher"
+    ],
+    "shared": false,
+    "created_at": "2026-08-30T22:57:24",
+    "updated_at": "2026-08-30T22:58:40",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Analyse cette page et mémorise les informations importantes :\nhttps://docs.python.org/3/library/json.html\nRecherche la documentation Python sur le module json et mémorise les informations importantes.",
+            "timestamp": "2026-08-30T22:57:29"
+        },
+        {
+            "role": "agent",
+            "content": "[FAIL] La tâche n'a pas pu être terminée dans la limite de 8 étapes.",
+            "timestamp": "2026-08-30T22:58:40",
+            "agent": "researcher"
+        }
+    ]
+}
