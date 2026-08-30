@@ -1,1 +1,32 @@
-[]
+[
+    {
+        "role": "user",
+        "content": "comment partir en vacances?",
+        "timestamp": "2026-08-30T13:37:14"
+    },
+    {
+        "role": "agent",
+        "content": "[DONE] La demande de l'utilisateur concerne la planification de vacances et non le développement logiciel. Je suggère de rechercher des offres de voyages adaptées à ses goûts et à son budget.",
+        "timestamp": "2026-08-30T13:37:14"
+    },
+    {
+        "role": "user",
+        "content": "comment partir en vacances?",
+        "timestamp": "2026-08-30T13:37:46"
+    },
+    {
+        "role": "agent",
+        "content": "[DONE] La demande de l'utilisateur concerne la planification de vacances et non le développement logiciel. Je suggère de rechercher des offres de voyages adaptées à ses goûts et à son budget.",
+        "timestamp": "2026-08-30T13:37:46"
+    },
+    {
+        "role": "user",
+        "content": "dans les vacances mets lundi prochain date darrivée et vendredi prochain date de depart dans les notres",
+        "timestamp": "2026-08-30T13:38:58"
+    },
+    {
+        "role": "agent",
+        "content": "{\n  \"action\": \"analyser_demande\",\n  \"planning\": [\n    {\n      \"objectif\": \"Mettre en place les dates de vacances dans les notes\",\n      \"fichiers_concernes\": [\n        \"applications/note_vacances.py\"\n      ],\n      \"étapes\": [\n        \"Définir les dates de lundi prochain et vendredi prochain\",\n        \"Écrire les dates dans le fichier note_vacances.py\"\n      ],\n      \"comportement_attendu\": \"Un programme qui contient les dates de lundi prochain en tant que date d'arrivée et vendredi prochain en tant que date de départ\",\n      \"résultat_attendu\": \"Note_vacances.py contient les dates correctement\",\n      \"contraintes\": \"Le programme doit être exécutable sans interaction utilisateur\"\n    }\n  ]\n}",
+        "timestamp": "2026-08-30T13:38:58"
+    }
+]

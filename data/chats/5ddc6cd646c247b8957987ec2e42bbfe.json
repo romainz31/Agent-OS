@@ -1,0 +1,23 @@
+{
+    "id": "5ddc6cd646c247b8957987ec2e42bbfe",
+    "title": "comment partir en vacances?",
+    "agents": [
+        "planner"
+    ],
+    "shared": false,
+    "created_at": "2026-08-30T13:36:59",
+    "updated_at": "2026-08-30T13:37:14",
+    "messages": [
+        {
+            "role": "user",
+            "content": "comment partir en vacances?",
+            "timestamp": "2026-08-30T13:37:06"
+        },
+        {
+            "role": "agent",
+            "content": "[DONE] La demande de l'utilisateur concerne la planification de vacances et non le développement logiciel. Je suggère de rechercher des offres de voyages adaptées à ses goûts et à son budget.",
+            "timestamp": "2026-08-30T13:37:14",
+            "agent": "planner"
+        }
+    ]
+}

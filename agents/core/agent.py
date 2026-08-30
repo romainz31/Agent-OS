@@ -1,12 +1,19 @@
 from agents.brain.llm import ask_llm
 from agents.brain.decision import analyze_response
 from agents.executor.executor import execute
+
 from agents.core.memory_store import (
     load_agent_memory,
     append_agent_memory,
     load_shared_memory,
     append_shared_memory,
     format_history
+)
+
+from agents.core.knowledge_store import (
+    search_knowledge,
+    format_knowledge,
+    add_knowledge
 )
 
 
@@ -20,8 +27,13 @@ class Agent:
     ):
 
         self.name = name
+
         self.role = role
-        self.allowed_tools = allowed_tools or []
+
+        self.allowed_tools = (
+            allowed_tools or []
+        )
+
 
     # ========================================================
     # CHAT
@@ -35,13 +47,21 @@ class Agent:
         extra_context=""
     ):
 
-        individual_history = load_agent_memory(
-            self.name
+        # ----------------------------------------------------
+        # MÉMOIRE INDIVIDUELLE
+        # ----------------------------------------------------
+
+        individual_history = (
+            load_agent_memory(
+                self.name
+            )
         )
+
 
         context_sections = [
 
-            "HISTORIQUE DE CONVERSATION AVEC CET AGENT :",
+            "HISTORIQUE DE CONVERSATION AVEC CET AGENT "
+            "(du plus ancien au plus récent) :",
 
             format_history(
                 individual_history
@@ -49,19 +69,23 @@ class Agent:
 
         ]
 
+
         # ----------------------------------------------------
         # MÉMOIRE PARTAGÉE
         # ----------------------------------------------------
 
         if shared:
 
-            shared_history = load_shared_memory()
+            shared_history = (
+                load_shared_memory()
+            )
 
             context_sections += [
 
                 "",
 
-                "MÉMOIRE PARTAGÉE DU PROJET :",
+                "MÉMOIRE PARTAGÉE DU PROJET "
+                "(échanges des agents et de l'utilisateur) :",
 
                 format_history(
                     shared_history
@@ -69,8 +93,35 @@ class Agent:
 
             ]
 
+
         # ----------------------------------------------------
-        # CONTEXTE TRANSMIS PAR L'ORCHESTRATEUR
+        # MÉMOIRE DE CONNAISSANCES
+        # ----------------------------------------------------
+
+        relevant_knowledge = (
+            search_knowledge(
+                message,
+                max_results=5
+            )
+        )
+
+
+        context_sections += [
+
+            "",
+
+            "BASE DE CONNAISSANCES "
+            "(informations déjà recherchées sur le Web) :",
+
+            format_knowledge(
+                relevant_knowledge
+            )
+
+        ]
+
+
+        # ----------------------------------------------------
+        # CONTEXTE DIRECT
         # ----------------------------------------------------
 
         if extra_context:
@@ -79,11 +130,16 @@ class Agent:
 
                 "",
 
-                "CONTEXTE TRANSMIS PAR L'ORCHESTRATEUR :",
+                "RÉSULTATS DIRECTS DES AUTRES AGENTS :",
 
                 extra_context
 
             ]
+
+
+        # ----------------------------------------------------
+        # TÂCHE
+        # ----------------------------------------------------
 
         task_with_context = f"""
 
@@ -91,19 +147,29 @@ class Agent:
 
 ============================================================
 
-NOUVELLE DEMANDE :
+NOUVEAU MESSAGE DE L'UTILISATEUR :
 
 {message}
+
 """
+
+
+        # ----------------------------------------------------
+        # EXÉCUTION
+        # ----------------------------------------------------
 
         result = self.run(
             task_with_context,
             max_steps=max_steps
         )
 
-        response_text = self.stringify_result(
-            result
+
+        response_text = (
+            self.stringify_result(
+                result
+            )
         )
+
 
         # ----------------------------------------------------
         # MÉMOIRE INDIVIDUELLE
@@ -115,11 +181,13 @@ NOUVELLE DEMANDE :
             message
         )
 
+
         append_agent_memory(
             self.name,
             "agent",
             response_text
         )
+
 
         # ----------------------------------------------------
         # MÉMOIRE PARTAGÉE
@@ -139,14 +207,111 @@ NOUVELLE DEMANDE :
                 response_text
             )
 
+
+        # ----------------------------------------------------
+        # MÉMOIRE DE CONNAISSANCES
+        #
+        # Seul le Researcher peut créer des connaissances.
+        # ----------------------------------------------------
+
+        if self.name == "Researcher":
+
+            self._save_research_knowledge(
+                result
+            )
+
+
         return result
 
+
     # ========================================================
-    # FORMATAGE
+    # SAUVEGARDE RESEARCH
+    # ========================================================
+
+    def _save_research_knowledge(
+        self,
+        result
+    ):
+
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            return
+
+
+        knowledge = result.get(
+            "knowledge"
+        )
+
+
+        if not isinstance(
+            knowledge,
+            dict
+        ):
+
+            return
+
+
+        title = knowledge.get(
+            "title",
+            ""
+        )
+
+
+        source = knowledge.get(
+            "source",
+            ""
+        )
+
+
+        summary = knowledge.get(
+            "summary",
+            ""
+        )
+
+
+        facts = knowledge.get(
+            "facts",
+            []
+        )
+
+
+        topics = knowledge.get(
+            "topics",
+            []
+        )
+
+
+        if not title:
+
+            return
+
+
+        add_knowledge(
+
+            title=title,
+
+            source=source,
+
+            summary=summary,
+
+            facts=facts,
+
+            topics=topics
+
+        )
+
+
+    # ========================================================
+    # STRINGIFY
     # ========================================================
 
     @staticmethod
-    def stringify_result(result):
+    def stringify_result(
+        result
+    ):
 
         if isinstance(
             result,
@@ -161,35 +326,31 @@ NOUVELLE DEMANDE :
                 "status"
             )
 
+
             if message and status:
 
                 return (
-                    f"[{status}] "
-                    f"{message}"
+                    f"[{status}] {message}"
                 )
+
 
             if message:
 
                 return message
 
-            try:
 
-                import json
+            return str(
+                result
+            )
 
-                return json.dumps(
-                    result,
-                    ensure_ascii=False,
-                    indent=2
-                )
 
-            except Exception:
+        return str(
+            result
+        )
 
-                return str(result)
-
-        return str(result)
 
     # ========================================================
-    # EXECUTION AGENT
+    # RUN
     # ========================================================
 
     def run(
@@ -200,12 +361,13 @@ NOUVELLE DEMANDE :
 
         history = []
 
+
         system_prompt = f"""
 
 Tu es l'agent {self.name} de Agent-OS.
 
 ============================================================
-TON RÔLE
+ROLE
 ============================================================
 
 {self.role}
@@ -217,93 +379,30 @@ OUTILS AUTORISÉS
 {self.allowed_tools}
 
 ============================================================
-RÈGLES GÉNÉRALES
+RÈGLES
 ============================================================
 
-1. Respecte strictement ton rôle.
+1. Utilise uniquement les outils autorisés.
 
-2. Utilise uniquement les outils autorisés.
+2. Respecte strictement ton rôle.
 
-3. Ne répète jamais inutilement une action.
+3. Ne fais jamais le travail d'un autre agent.
 
-4. Analyse toujours le résultat d'un outil avant
-   de décider de l'action suivante.
+4. Si un outil échoue, analyse l'erreur.
 
-5. Si une action réussit, considère son résultat
-   comme acquis.
+5. Après une erreur, tu peux réessayer.
 
-6. Si une action échoue, corrige la cause avant
-   de réessayer.
+6. Ne répète jamais exactement la même action
+   si son résultat n'a pas changé.
 
-7. Ne répète jamais exactement la même action
-   après un échec sans modifier quelque chose.
+7. Une exécution Python réussie ne signifie PAS
+   automatiquement que la tâche est terminée.
 
-8. Les fichiers du projet destinés aux utilisateurs
-   doivent être placés dans :
+8. Lorsque ton travail est terminé,
+   retourne uniquement un JSON final.
 
-   applications/
-
-9. Les données doivent être placées dans :
-
-   data/
-
-10. NE JAMAIS créer un fichier utilisateur à la racine
-    du projet.
-
-11. Lorsqu'un fichier est créé dans applications/,
-    utilise toujours un chemin comme :
-
-    applications/mon_fichier.py
-
-12. Avant d'utiliser run_python, vérifie que le programme
-    peut réellement s'exécuter automatiquement.
-
-13. NE CRÉE PAS de programme nécessitant une saisie
-    utilisateur interactive avec input() si tu comptes
-    utiliser run_python pour le tester.
-
-14. Évite les boucles infinies comme :
-
-    while True:
-
-    lorsqu'elles nécessitent une interaction utilisateur.
-
-15. Pour tester un programme interactif, crée plutôt
-    des fonctions testables automatiquement.
-
-16. Si le programme fonctionne et que les tests sont
-    réussis, arrête ton travail.
-
-17. Ne relance pas un test déjà réussi sans raison.
-
-18. Lorsque ton travail est terminé, retourne un JSON final.
-
-============================================================
-FORMAT DES OUTILS
-============================================================
-
-Pour utiliser un outil :
-
-{{
-    "tool": "nom_outil",
-    "arguments": {{
-        "argument": "valeur"
-    }}
-}}
-
-Pour terminer :
-
-{{
-    "status": "DONE",
-    "message": "description du travail effectué"
-}}
-
-============================================================
 """
 
-        # ====================================================
-        # BOUCLE DE TRAVAIL
-        # ====================================================
 
         for step in range(
             1,
@@ -311,6 +410,7 @@ Pour terminer :
         ):
 
             print()
+
             print(
                 "=" * 60
             )
@@ -323,34 +423,54 @@ Pour terminer :
                 "=" * 60
             )
 
+
             prompt = f"""
 
 {system_prompt}
 
 ============================================================
-TÂCHE
-============================================================
+
+TÂCHE :
 
 {task}
 
 ============================================================
-HISTORIQUE DES ACTIONS
-============================================================
+
+HISTORIQUE DES ACTIONS :
 
 {history}
 
 ============================================================
 
-Décide maintenant de la prochaine action.
+Décide maintenant de l'action suivante.
 
-Retourne UNIQUEMENT du JSON.
+SI TU DOIS UTILISER UN OUTIL :
+
+Retourne UNIQUEMENT :
+
+{{
+    "tool": "nom_outil",
+    "arguments": {{
+        "argument": "valeur"
+    }}
+}}
+
+SI TON TRAVAIL EST TERMINÉ :
+
+Retourne UNIQUEMENT un JSON final adapté à ton rôle.
+
+NE RETOURNE PAS DE TEXTE EN DEHORS DU JSON.
+
 """
+
 
             response = ask_llm(
                 prompt
             )
 
+
             print()
+
             print(
                 "RÉPONSE DU LLM :"
             )
@@ -359,13 +479,11 @@ Retourne UNIQUEMENT du JSON.
                 response
             )
 
+
             decision = analyze_response(
                 response
             )
 
-            # =================================================
-            # RÉPONSE INVALIDE
-            # =================================================
 
             if not isinstance(
                 decision,
@@ -384,13 +502,15 @@ Retourne UNIQUEMENT du JSON.
 
                 continue
 
-            # =================================================
+
+            # ------------------------------------------------
             # RÉPONSE FINALE
-            # =================================================
+            # ------------------------------------------------
 
             if "tool" not in decision:
 
                 print()
+
                 print(
                     "=" * 60
                 )
@@ -407,24 +527,28 @@ Retourne UNIQUEMENT du JSON.
                     decision
                 )
 
+
                 return decision
 
-            # =================================================
+
+            # ------------------------------------------------
             # OUTIL
-            # =================================================
+            # ------------------------------------------------
 
             tool = decision.get(
                 "tool"
             )
+
 
             arguments = decision.get(
                 "arguments",
                 {}
             )
 
-            # =================================================
-            # OUTIL AUTORISÉ
-            # =================================================
+
+            # ------------------------------------------------
+            # VÉRIFICATION AUTORISATION
+            # ------------------------------------------------
 
             if tool not in self.allowed_tools:
 
@@ -432,10 +556,14 @@ Retourne UNIQUEMENT du JSON.
                     f"Outil non autorisé : {tool}"
                 )
 
+
+                print()
+
                 print(
                     "ERREUR :",
                     error
                 )
+
 
                 history.append({
 
@@ -459,14 +587,10 @@ Retourne UNIQUEMENT du JSON.
 
                 continue
 
-            # =================================================
-            # NORMALISATION DES CHEMINS
-            # =================================================
 
-            arguments = self.normalize_arguments(
-                tool,
-                arguments
-            )
+            # ------------------------------------------------
+            # ACTION
+            # ------------------------------------------------
 
             action = {
 
@@ -478,25 +602,10 @@ Retourne UNIQUEMENT du JSON.
 
             }
 
-            # =================================================
-            # DÉTECTION ACTION IDENTIQUE
-            # =================================================
 
-            previous_actions = [
+            previous_tool_entries = [
 
-                {
-
-                    "tool":
-                        item.get(
-                            "tool"
-                        ),
-
-                    "arguments":
-                        item.get(
-                            "arguments"
-                        )
-
-                }
+                item
 
                 for item in history
 
@@ -504,71 +613,125 @@ Retourne UNIQUEMENT du JSON.
 
             ]
 
+
+            previous_actions = [
+
+                {
+
+                    "tool":
+                        item.get("tool"),
+
+                    "arguments":
+                        item.get("arguments")
+
+                }
+
+                for item in previous_tool_entries
+
+            ]
+
+
             if action in previous_actions:
 
-                previous_result = None
+                last_result = next(
 
-                for item in reversed(
-                    history
-                ):
-
-                    if (
-                        item.get(
-                            "tool"
-                        )
-                        ==
-                        tool
-
-                        and
+                    (
 
                         item.get(
-                            "arguments"
-                        )
-                        ==
-                        arguments
-                    ):
-
-                        previous_result = item.get(
                             "result"
                         )
 
-                        break
+                        for item in reversed(
+                            previous_tool_entries
+                        )
 
-                # ------------------------------------------------
-                # Si l'action avait réussi
-                # ------------------------------------------------
+                        if item.get(
+                            "tool"
+                        ) == tool
 
-                if self._result_successful(
-                    previous_result
-                ):
+                        and item.get(
+                            "arguments"
+                        ) == arguments
 
-                    print()
-                    print(
-                        "⚠️ Action déjà exécutée avec succès."
+                    ),
+
+                    None
+
+                )
+
+
+                repeat_count = sum(
+
+                    1
+
+                    for item in history
+
+                    if item.get(
+                        "type"
+                    ) == "repeated_action"
+
+                    and item.get(
+                        "action"
+                    ) == action
+
+                )
+
+
+                if repeat_count >= 1:
+
+                    success = (
+
+                        isinstance(
+                            last_result,
+                            dict
+                        )
+
+                        and last_result.get(
+                            "success",
+                            True
+                        ) is not False
+
+                        and not last_result.get(
+                            "error"
+                        )
+
+                    ) or (
+
+                        isinstance(
+                            last_result,
+                            str
+                        )
+
+                        and "erreur"
+                        not in last_result.lower()
+
+                        and "error"
+                        not in last_result.lower()
+
                     )
+
 
                     return {
 
                         "status":
-                            "DONE",
+                            "DONE"
+                            if success
+                            else "FAIL",
 
                         "message":
                             (
-                                "Travail terminé. "
-                                "L'action demandée avait "
-                                "déjà été exécutée avec succès."
-                            )
+                                "Travail arrêté automatiquement "
+                                "après détection d'une boucle."
+                            ),
+
+                        "last_action":
+                            action,
+
+                        "last_result":
+                            last_result
 
                     }
 
-                # ------------------------------------------------
-                # Action ayant échoué
-                # ------------------------------------------------
-
-                print()
-                print(
-                    "⚠️ Action répétée après échec."
-                )
 
                 history.append({
 
@@ -579,27 +742,31 @@ Retourne UNIQUEMENT du JSON.
                         action,
 
                     "previous_result":
-                        previous_result,
+                        last_result,
 
                     "instruction":
                         (
-                            "Ne répète pas cette action. "
-                            "Corrige le problème ou "
-                            "choisis une autre approche."
+                            "Cette action a déjà été exécutée. "
+                            "Ne la répète pas. "
+                            "Choisis une action différente "
+                            "ou termine la tâche."
                         )
 
                 })
 
                 continue
 
-            # =================================================
+
+            # ------------------------------------------------
             # EXÉCUTION
-            # =================================================
+            # ------------------------------------------------
 
             print()
+
             print(
                 f"[AGENT] → Outil : {tool}"
             )
+
 
             result = execute({
 
@@ -611,7 +778,9 @@ Retourne UNIQUEMENT du JSON.
 
             })
 
+
             print()
+
             print(
                 "RÉSULTAT OUTIL :"
             )
@@ -619,6 +788,7 @@ Retourne UNIQUEMENT du JSON.
             print(
                 result
             )
+
 
             history.append({
 
@@ -633,9 +803,10 @@ Retourne UNIQUEMENT du JSON.
 
             })
 
-        # =====================================================
+
+        # ----------------------------------------------------
         # LIMITE
-        # =====================================================
+        # ----------------------------------------------------
 
         return {
 
@@ -644,138 +815,8 @@ Retourne UNIQUEMENT du JSON.
 
             "message":
                 (
-                    f"Nombre maximum de {max_steps} "
-                    "étapes atteint."
+                    f"La tâche n'a pas pu être terminée "
+                    f"dans la limite de {max_steps} étapes."
                 )
 
         }
-
-    # ========================================================
-    # NORMALISATION DES ARGUMENTS
-    # ========================================================
-
-    @staticmethod
-    def normalize_arguments(
-        tool,
-        arguments
-    ):
-
-        if not isinstance(
-            arguments,
-            dict
-        ):
-
-            return {}
-
-        arguments = dict(
-            arguments
-        )
-
-        # ----------------------------------------------------
-        # Tous les fichiers utilisateur doivent être
-        # dans applications/
-        # ----------------------------------------------------
-
-        if tool in (
-            "write_file",
-            "read_file",
-            "run_python"
-        ):
-
-            file_path = arguments.get(
-                "file_path"
-            )
-
-            if isinstance(
-                file_path,
-                str
-            ):
-
-                file_path = file_path.replace(
-                    "\\",
-                    "/"
-                )
-
-                # ---------------------------------------------
-                # Fichier racine
-                # ---------------------------------------------
-
-                if (
-                    "/" not in file_path
-                    and
-                    not file_path.startswith(
-                        "applications/"
-                    )
-                    and
-                    not file_path.startswith(
-                        "data/"
-                    )
-                ):
-
-                    file_path = (
-                        "applications/"
-                        + file_path
-                    )
-
-                arguments[
-                    "file_path"
-                ] = file_path
-
-        return arguments
-
-    # ========================================================
-    # SUCCÈS OUTIL
-    # ========================================================
-
-    @staticmethod
-    def _result_successful(
-        result
-    ):
-
-        if result is None:
-
-            return False
-
-        if isinstance(
-            result,
-            dict
-        ):
-
-            if result.get(
-                "success"
-            ) is False:
-
-                return False
-
-            if result.get(
-                "error"
-            ):
-
-                return False
-
-            return True
-
-        if isinstance(
-            result,
-            str
-        ):
-
-            text = result.lower()
-
-            if (
-                "erreur" in text
-                or
-                "error" in text
-                or
-                "failed" in text
-                or
-                "timeout" in text
-                or
-                "délai maximum" in text
-            ):
-
-                return False
-
-            return True
-
-        return False
