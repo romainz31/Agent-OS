@@ -1,31 +1,12 @@
 """
-Manager principal Agent-OS V2.1.
+Manager principal Agent-OS V2.2.
 
-Architecture :
-
-Utilisateur
-    ↓
-Manager
-    ↓
-ManagerRouter
-    ↓
-conversation / tâche / mission
-    ↓
-WorkerEngine
-    ↓
-Workers
-    ↓
-EventBus
-    ↓
-Manager
-
-Principe V2.1 :
-
-Le LLM ne décide plus seul du routage.
-Python choisit l'action générale et le worker.
-
-La conversation courante reste en RAM.
-La mémoire longue durée est séparée.
+Ajoute :
+- dépendances entre tâches ;
+- référence au dernier travail de la session ;
+- notifications de fin ;
+- transmission automatique du résultat entre étapes ;
+- affichage explicite task/worker/status.
 """
 
 from __future__ import annotations
@@ -89,15 +70,32 @@ from v2.workers.worker_engine import (
 
 
 class Manager:
-    """
-    Manager principal Agent-OS.
-    """
 
     SESSION_HISTORY_LIMIT = 12
 
+    REFERENCE_MARKERS = (
+        "ce script",
+        "ce code",
+        "cette solution",
+        "ce résultat",
+        "ce resultat",
+        "ça",
+        "ca",
+        "celui-ci",
+        "celle-ci",
+        "le précédent",
+        "la précédente",
+        "le precedent",
+        "la precedente",
+        "ce qu'il a fait",
+        "ce qu’elle a fait",
+    )
+
     def __init__(
         self,
-        llm: Optional[LLM] = None,
+        llm: Optional[
+            LLM
+        ] = None,
         memory: Optional[
             MemoryStore
         ] = None,
@@ -121,9 +119,12 @@ class Manager:
         ] = None,
     ) -> None:
 
-        self.llm = llm or LLM(
-            host=OLLAMA_HOST,
-            model=OLLAMA_MODEL,
+        self.llm = (
+            llm
+            or LLM(
+                host=OLLAMA_HOST,
+                model=OLLAMA_MODEL,
+            )
         )
 
         self.memory = (
@@ -154,8 +155,12 @@ class Manager:
         self.worker_engine = (
             worker_engine
             or WorkerEngine(
-                task_manager=self.tasks,
-                event_bus=self.event_bus,
+                task_manager=(
+                    self.tasks
+                ),
+                event_bus=(
+                    self.event_bus
+                ),
             )
         )
 
@@ -164,10 +169,16 @@ class Manager:
             or ManagerRouter()
         )
 
-        # Conversation de la session actuelle.
-        # Elle n'est PAS persistée.
         self.session_messages: list[
             dict[str, str]
+        ] = []
+
+        self.last_task_id: Optional[
+            str
+        ] = None
+
+        self.notifications: list[
+            str
         ] = []
 
         self.event_bus.subscribe(
@@ -178,6 +189,11 @@ class Manager:
         self.event_bus.subscribe(
             "task.started",
             self._on_task_started,
+        )
+
+        self.event_bus.subscribe(
+            "task.waiting_dependency",
+            self._on_task_waiting_dependency,
         )
 
         self.event_bus.subscribe(
@@ -203,33 +219,41 @@ class Manager:
             worker
         )
 
+    def get_worker_names(
+        self,
+    ) -> list[str]:
+
+        return list(
+            self.worker_engine
+            .workers
+            .keys()
+        )
+
     def list_workers(
         self,
-    ) -> list[dict[str, str]]:
+    ) -> list[
+        dict[str, str]
+    ]:
 
         return [
             {
                 "name": name,
-                "description": getattr(
-                    worker,
-                    "description",
-                    "",
+                "description": (
+                    getattr(
+                        worker,
+                        "description",
+                        "",
+                    )
                 ),
             }
             for (
                 name,
                 worker,
             )
-            in self.worker_engine.workers.items()
+            in self.worker_engine
+            .workers
+            .items()
         ]
-
-    def get_worker_names(
-        self,
-    ) -> list[str]:
-
-        return list(
-            self.worker_engine.workers.keys()
-        )
 
     # ========================================================
     # CHAT
@@ -240,23 +264,29 @@ class Manager:
         message: str,
     ) -> str:
 
-        message = message.strip()
+        message = (
+            message.strip()
+        )
 
         if not message:
 
             return (
-                "Je n'ai reçu aucun message."
+                "Je n'ai reçu "
+                "aucun message."
             )
 
-        route = self.router.route(
-            message=message,
-            available_workers=(
-                self.get_worker_names()
-            ),
+        route = (
+            self.router.route(
+                message=message,
+                available_workers=(
+                    self.get_worker_names()
+                ),
+            )
         )
 
         long_term_context = (
-            self.memory.build_manager_context(
+            self.memory
+            .build_manager_context(
                 query=message
             )
         )
@@ -274,13 +304,9 @@ class Manager:
 
                 response = (
                     self._conversation_reply(
-                        message=message,
-                        session_context=(
-                            session_context
-                        ),
-                        long_term_context=(
-                            long_term_context
-                        ),
+                        message,
+                        session_context,
+                        long_term_context,
                     )
                 )
 
@@ -288,31 +314,25 @@ class Manager:
 
                 decision = (
                     self._build_work_decision(
-                        message=message,
-                        route=route,
-                        session_context=(
-                            session_context
-                        ),
-                        long_term_context=(
-                            long_term_context
-                        ),
+                        message,
+                        route,
+                        session_context,
+                        long_term_context,
                     )
                 )
 
                 response = (
                     self._execute_decision(
-                        decision=decision,
-                        original_message=(
-                            message
-                        ),
+                        decision,
+                        message,
                     )
                 )
 
         except LLMError as exc:
 
             response = (
-                "Je n'arrive pas à contacter "
-                "le modèle local.\n"
+                "Je n'arrive pas à "
+                "contacter le modèle local.\n"
                 f"Détail : {exc}"
             )
 
@@ -324,13 +344,13 @@ class Manager:
             )
 
         self._append_session(
-            role="user",
-            content=message,
+            "user",
+            message,
         )
 
         self._append_session(
-            role="manager",
-            content=response,
+            "manager",
+            response,
         )
 
         return response
@@ -349,35 +369,16 @@ class Manager:
         prompt = f"""
 Tu es le Manager personnel de l'utilisateur.
 
-Tu es son interlocuteur principal.
-
-Tu peux discuter naturellement et répondre
-directement aux questions qui ne nécessitent pas
-de travail délégué.
-
-============================================================
-CONVERSATION DE CETTE SESSION
-============================================================
-
+SESSION :
 {session_context}
 
-============================================================
-MÉMOIRE LONGUE DURÉE PERTINENTE
-============================================================
-
+MÉMOIRE LONGUE DURÉE PERTINENTE :
 {long_term_context}
 
-============================================================
-MESSAGE ACTUEL
-============================================================
-
+MESSAGE :
 {message}
 
 Réponds naturellement en français.
-
-Ne parle pas de workers, de routage ou
-d'architecture interne sauf si l'utilisateur
-pose explicitement une question à ce sujet.
 """
 
         return self.llm.simple_chat(
@@ -389,7 +390,7 @@ pose explicitement une question à ce sujet.
         )
 
     # ========================================================
-    # WORK DECISION
+    # DECISION
     # ========================================================
 
     def _build_work_decision(
@@ -399,65 +400,37 @@ pose explicitement une question à ce sujet.
         session_context: str,
         long_term_context: str,
     ) -> ManagerDecision:
-        """
-        Le routeur Python a déjà décidé l'action.
-
-        Le LLM ne fait ici que structurer
-        proprement la tâche ou mission.
-        """
 
         prompt = f"""
-Tu travailles pour le Manager Agent-OS.
+Python a déjà décidé :
 
-Python a déjà décidé le routage suivant :
+ACTION = {route.action}
+WORKER = {route.worker or "non déterminé"}
 
-ACTION :
-{route.action}
+Tu n'as pas le droit de changer
+l'action ni le worker.
 
-WORKER :
-{route.worker or "non déterminé"}
-
-RAISON :
-{route.reason}
-
-Tu n'as PAS le droit de changer cette action.
-
-============================================================
-MESSAGE UTILISATEUR
-============================================================
-
+MESSAGE :
 {message}
 
-============================================================
-SESSION ACTUELLE
-============================================================
-
+SESSION :
 {session_context}
 
-============================================================
-MÉMOIRE PERTINENTE
-============================================================
-
+MÉMOIRE :
 {long_term_context}
 
-============================================================
-FORMAT
-============================================================
-
-Si ACTION = create_task :
+Si create_task :
 
 {{
-    "response": "courte confirmation naturelle",
     "title": "titre clair",
-    "description": "description complète de la tâche",
+    "description": "description complète",
     "priority": "normal",
     "deadline": null
 }}
 
-Si ACTION = create_mission :
+Si create_mission :
 
 {{
-    "response": "courte confirmation naturelle",
     "title": "titre clair",
     "objective": "objectif global",
     "description": "description précise de la première étape",
@@ -465,15 +438,14 @@ Si ACTION = create_mission :
     "deadline": null
 }}
 
-Réponds UNIQUEMENT avec le JSON.
+JSON uniquement.
 """
 
         raw = self.llm.simple_chat(
             prompt=prompt,
             system_prompt=(
                 "Tu structures des tâches "
-                "pour Agent-OS. "
-                "Tu réponds uniquement en JSON."
+                "Agent-OS. JSON uniquement."
             ),
         )
 
@@ -481,16 +453,15 @@ Réponds UNIQUEMENT avec le JSON.
             raw
         )
 
-        if route.action == "create_task":
+        if (
+            route.action
+            == "create_task"
+        ):
 
             return ManagerDecision(
-                action="create_task",
-                response=str(
-                    data.get(
-                        "response",
-                        "",
-                    )
-                ).strip(),
+                action=(
+                    "create_task"
+                ),
                 title=(
                     str(
                         data.get(
@@ -511,9 +482,11 @@ Réponds UNIQUEMENT avec le JSON.
                     ).strip()
                     or message
                 ),
-                priority=self._safe_priority(
-                    data.get(
-                        "priority"
+                priority=(
+                    self._safe_priority(
+                        data.get(
+                            "priority"
+                        )
                     )
                 ),
                 deadline=(
@@ -537,13 +510,9 @@ Réponds UNIQUEMENT avec le JSON.
             )
 
         return ManagerDecision(
-            action="create_mission",
-            response=str(
-                data.get(
-                    "response",
-                    "",
-                )
-            ).strip(),
+            action=(
+                "create_mission"
+            ),
             title=(
                 str(
                     data.get(
@@ -573,9 +542,11 @@ Réponds UNIQUEMENT avec le JSON.
                 ).strip()
                 or message
             ),
-            priority=self._safe_priority(
-                data.get(
-                    "priority"
+            priority=(
+                self._safe_priority(
+                    data.get(
+                        "priority"
+                    )
                 )
             ),
             deadline=(
@@ -598,7 +569,7 @@ Réponds UNIQUEMENT avec le JSON.
         )
 
     # ========================================================
-    # EXECUTE
+    # EXECUTION
     # ========================================================
 
     def _execute_decision(
@@ -614,11 +585,11 @@ Réponds UNIQUEMENT avec le JSON.
             == "create_task"
         ):
 
-            return self._execute_create_task(
-                decision=decision,
-                original_message=(
-                    original_message
-                ),
+            return (
+                self._execute_create_task(
+                    decision,
+                    original_message,
+                )
             )
 
         if (
@@ -626,16 +597,19 @@ Réponds UNIQUEMENT avec le JSON.
             == "create_mission"
         ):
 
-            return self._execute_create_mission(
-                decision=decision,
-                original_message=(
-                    original_message
-                ),
+            return (
+                self._execute_create_mission(
+                    decision,
+                    original_message,
+                )
             )
 
         return (
             decision.response
-            or "Décision non exécutable."
+            or (
+                "Décision "
+                "non exécutable."
+            )
         )
 
     # ========================================================
@@ -656,75 +630,108 @@ Réponds UNIQUEMENT avec le JSON.
         if not assigned_agent:
 
             return (
-                "Aucun worker n'est disponible."
+                "Aucun worker "
+                "n'est disponible."
             )
 
-        if (
-            assigned_agent
-            not in self.get_worker_names()
-        ):
-
-            return (
-                f"Le worker '{assigned_agent}' "
-                "n'est pas disponible."
+        dependencies = (
+            self._resolve_dependencies(
+                original_message
             )
+        )
 
-        task = self.tasks.create(
-            title=(
-                decision.title
-                or self._fallback_title(
-                    original_message
-                )
-            ),
-            description=(
-                decision.description
-                or original_message
-            ),
-            priority=(
-                decision.priority
-            ),
-            deadline=(
-                decision.deadline
-            ),
-            assigned_agent=(
-                assigned_agent
-            ),
-            metadata=(
-                decision.metadata
-            ),
+        task = (
+            self.tasks.create(
+                title=(
+                    decision.title
+                    or self._fallback_title(
+                        original_message
+                    )
+                ),
+                description=(
+                    decision.description
+                    or original_message
+                ),
+                priority=(
+                    decision.priority
+                ),
+                deadline=(
+                    decision.deadline
+                ),
+                assigned_agent=(
+                    assigned_agent
+                ),
+                depends_on=(
+                    dependencies
+                ),
+                metadata=(
+                    decision.metadata
+                ),
+            )
+        )
+
+        self.last_task_id = (
+            task.id
         )
 
         self.event_bus.publish(
             "task.created",
             {
-                "task_id": task.id,
-                "title": task.title,
+                "task_id": (
+                    task.id
+                ),
+                "title": (
+                    task.title
+                ),
                 "assigned_agent": (
                     assigned_agent
                 ),
             },
         )
 
-        submitted = (
+        accepted = (
             self.worker_engine.submit(
                 task.id
             )
         )
 
-        if not submitted:
+        task = (
+            self.tasks.get(
+                task.id
+            )
+            or task
+        )
+
+        if not accepted:
 
             return (
-                f"Tâche {task.id} créée, "
-                "mais son lancement a échoué."
+                f"Tâche {task.id} créée "
+                "mais impossible à lancer.\n"
+                f"Worker : "
+                f"{assigned_agent}\n"
+                f"Statut : "
+                f"{task.status}"
+            )
+
+        dependency_line = ""
+
+        if task.depends_on:
+
+            dependency_line = (
+                "\nDépend de : "
+                + ", ".join(
+                    task.depends_on
+                )
             )
 
         return (
-            decision.response
-            or (
-                "C'est lancé. "
-                f"Je l'ai confié à "
-                f"{assigned_agent}."
-            )
+            f"Tâche créée : "
+            f"{task.id}\n"
+            f"Worker : "
+            f"{assigned_agent}\n"
+            f"Statut : "
+            f"{task.status}"
+            f"{dependency_line}"
         )
 
     # ========================================================
@@ -737,26 +744,28 @@ Réponds UNIQUEMENT avec le JSON.
         original_message: str,
     ) -> str:
 
-        mission = self.missions.create(
-            title=(
-                decision.title
-                or self._fallback_title(
-                    original_message
-                )
-            ),
-            objective=(
-                decision.objective
-                or original_message
-            ),
-            priority=(
-                decision.priority
-            ),
-            deadline=(
-                decision.deadline
-            ),
-            metadata=(
-                decision.metadata
-            ),
+        mission = (
+            self.missions.create(
+                title=(
+                    decision.title
+                    or self._fallback_title(
+                        original_message
+                    )
+                ),
+                objective=(
+                    decision.objective
+                    or original_message
+                ),
+                priority=(
+                    decision.priority
+                ),
+                deadline=(
+                    decision.deadline
+                ),
+                metadata=(
+                    decision.metadata
+                ),
+            )
         )
 
         assigned_agent = (
@@ -771,13 +780,9 @@ Réponds UNIQUEMENT avec le JSON.
 
             first_route = (
                 self.router.route(
-                    message=(
-                        decision.description
-                        or original_message
-                    ),
-                    available_workers=(
-                        self.get_worker_names()
-                    ),
+                    decision.description
+                    or original_message,
+                    self.get_worker_names(),
                 )
             )
 
@@ -790,12 +795,16 @@ Réponds UNIQUEMENT avec le JSON.
 
             self.missions.fail(
                 mission.id,
-                "Aucun worker disponible.",
+                (
+                    "Aucun worker "
+                    "disponible."
+                ),
             )
 
             return (
-                f"Mission {mission.id} créée, "
-                "mais aucun worker n'est disponible."
+                f"Mission {mission.id} "
+                "créée mais aucun "
+                "worker n'est disponible."
             )
 
         task = self.tasks.create(
@@ -832,49 +841,82 @@ Réponds UNIQUEMENT avec le JSON.
             task.id,
         )
 
+        self.last_task_id = (
+            task.id
+        )
+
         self.event_bus.publish(
             "task.created",
             {
-                "task_id": task.id,
+                "task_id": (
+                    task.id
+                ),
                 "mission_id": (
                     mission.id
                 ),
-                "title": task.title,
+                "title": (
+                    task.title
+                ),
                 "assigned_agent": (
                     assigned_agent
                 ),
             },
         )
 
-        submitted = (
-            self.worker_engine.submit(
+        self.worker_engine.submit(
+            task.id
+        )
+
+        task = (
+            self.tasks.get(
                 task.id
             )
+            or task
         )
-
-        if not submitted:
-
-            self.missions.fail(
-                mission.id,
-                (
-                    "Impossible de lancer "
-                    "la première étape."
-                ),
-            )
-
-            return (
-                f"Mission {mission.id} créée, "
-                "mais elle n'a pas pu démarrer."
-            )
 
         return (
-            decision.response
-            or (
-                "Mission lancée. "
-                "Je commence par "
-                f"{assigned_agent}."
-            )
+            f"Mission créée : "
+            f"{mission.id}\n"
+            f"Première tâche : "
+            f"{task.id}\n"
+            f"Worker : "
+            f"{assigned_agent}\n"
+            f"Statut : "
+            f"{task.status}"
         )
+
+    # ========================================================
+    # REFERENCES
+    # ========================================================
+
+    def _resolve_dependencies(
+        self,
+        message: str,
+    ) -> list[str]:
+
+        if not self.last_task_id:
+
+            return []
+
+        lower = (
+            message.lower()
+        )
+
+        if any(
+            marker in lower
+            for marker
+            in self.REFERENCE_MARKERS
+        ):
+
+            if self.tasks.get(
+                self.last_task_id
+            ):
+
+                return [
+                    self.last_task_id
+                ]
+
+        return []
 
     # ========================================================
     # EVENTS
@@ -894,15 +936,33 @@ Réponds UNIQUEMENT avec le JSON.
 
         pass
 
+    def _on_task_waiting_dependency(
+        self,
+        event: Event,
+    ) -> None:
+
+        task_id = (
+            event.data.get(
+                "task_id"
+            )
+        )
+
+        if task_id:
+
+            self.notifications.append(
+                f"⏳ {task_id} attend "
+                "la fin de ses dépendances."
+            )
+
     def _on_task_completed(
         self,
         event: Event,
     ) -> None:
 
-        data = event.data
-
-        task_id = data.get(
-            "task_id"
+        task_id = (
+            event.data.get(
+                "task_id"
+            )
         )
 
         if not task_id:
@@ -915,7 +975,12 @@ Réponds UNIQUEMENT avec le JSON.
         if task is None:
             return
 
-        # Mémoire de travail persistante.
+        self.notifications.append(
+            f"✓ {task.id} terminée "
+            f"par {task.assigned_agent} : "
+            f"{task.title}"
+        )
+
         if task.result:
 
             try:
@@ -932,11 +997,9 @@ Réponds UNIQUEMENT avec le JSON.
                         "task_id": (
                             task.id
                         ),
-                        "status": (
-                            "completed"
-                        ),
                         "worker": (
-                            task.assigned_agent
+                            task
+                            .assigned_agent
                         ),
                     },
                 )
@@ -951,23 +1014,22 @@ Réponds UNIQUEMENT avec le JSON.
             )
         )
 
-        if not mission_id:
-            return
+        if mission_id:
 
-        self._continue_mission(
-            mission_id=mission_id,
-            completed_task=task,
-        )
+            self._continue_mission(
+                mission_id,
+                task,
+            )
 
     def _on_task_failed(
         self,
         event: Event,
     ) -> None:
 
-        data = event.data
-
-        task_id = data.get(
-            "task_id"
+        task_id = (
+            event.data.get(
+                "task_id"
+            )
         )
 
         if not task_id:
@@ -977,29 +1039,44 @@ Réponds UNIQUEMENT avec le JSON.
             task_id
         )
 
-        if task is None:
-            return
+        if task:
 
-        mission_id = (
-            task.metadata.get(
-                "mission_id"
+            self.notifications.append(
+                f"✗ {task.id} a échoué : "
+                f"{task.error or event.data.get('error')}"
             )
-        )
 
-        if not mission_id:
-            return
-
-        self.missions.fail(
-            mission_id,
-            (
-                data.get("error")
-                or task.error
-                or (
-                    "Une étape de la "
-                    "mission a échoué."
+            mission_id = (
+                task.metadata.get(
+                    "mission_id"
                 )
-            ),
+            )
+
+            if mission_id:
+
+                self.missions.fail(
+                    mission_id,
+                    (
+                        task.error
+                        or (
+                            "Une étape "
+                            "de la mission "
+                            "a échoué."
+                        )
+                    ),
+                )
+
+    def drain_notifications(
+        self,
+    ) -> list[str]:
+
+        notifications = list(
+            self.notifications
         )
+
+        self.notifications.clear()
+
+        return notifications
 
     # ========================================================
     # MISSION CONTINUATION
@@ -1011,39 +1088,18 @@ Réponds UNIQUEMENT avec le JSON.
         completed_task,
     ) -> None:
 
-        mission = self.missions.get(
-            mission_id
+        mission = (
+            self.missions.get(
+                mission_id
+            )
         )
 
         if mission is None:
             return
 
-        mission_tasks = []
-
-        for task_id in mission.task_ids:
-
-            task = self.tasks.get(
-                task_id
-            )
-
-            if task:
-                mission_tasks.append(
-                    task
-                )
-
         previous_result = (
             completed_task.result
             or "Aucun résultat."
-        )
-
-        history = "\n".join(
-            (
-                f"- Étape "
-                f"{task.metadata.get('mission_step', '?')} : "
-                f"{task.title} "
-                f"[{task.status}]"
-            )
-            for task in mission_tasks
         )
 
         workers = ", ".join(
@@ -1057,7 +1113,7 @@ MISSION :
 OBJECTIF :
 {mission.objective}
 
-WORKERS DISPONIBLES :
+WORKERS :
 {workers}
 
 DERNIÈRE ÉTAPE :
@@ -1066,45 +1122,45 @@ DERNIÈRE ÉTAPE :
 RÉSULTAT :
 {previous_result}
 
-HISTORIQUE :
-{history}
-
 Décide si la mission est terminée.
 
-Si elle est terminée :
+Si terminée :
 
 {{
     "next": "complete",
-    "result": "résultat final synthétique"
+    "result": "résultat final"
 }}
 
 Sinon :
 
 {{
     "next": "task",
-    "title": "titre de l'étape",
-    "description": "travail précis à effectuer",
+    "title": "titre",
+    "description": "étape précise",
     "priority": "normal"
 }}
 
-Ne choisis PAS le worker.
-Python le fera.
-
-Réponds uniquement en JSON.
+Ne choisis pas le worker.
+JSON uniquement.
 """
 
         try:
 
-            raw = self.llm.simple_chat(
-                prompt=prompt,
-                system_prompt=(
-                    "Tu planifies la suite "
-                    "d'une mission Agent-OS."
-                ),
+            raw = (
+                self.llm.simple_chat(
+                    prompt=prompt,
+                    system_prompt=(
+                        "Tu planifies "
+                        "une mission Agent-OS. "
+                        "JSON uniquement."
+                    ),
+                )
             )
 
-            decision = self._parse_json(
-                raw
+            data = (
+                self._parse_json(
+                    raw
+                )
             )
 
         except Exception as exc:
@@ -1116,25 +1172,32 @@ Réponds uniquement en JSON.
 
             return
 
-        next_action = decision.get(
-            "next"
-        )
-
-        if next_action == "complete":
+        if (
+            data.get("next")
+            == "complete"
+        ):
 
             self.missions.complete(
                 mission_id,
                 result=str(
-                    decision.get(
+                    data.get(
                         "result",
                         previous_result,
                     )
                 ),
             )
 
+            self.notifications.append(
+                f"✓ Mission "
+                f"{mission_id} terminée."
+            )
+
             return
 
-        if next_action != "task":
+        if (
+            data.get("next")
+            != "task"
+        ):
 
             self.missions.fail(
                 mission_id,
@@ -1147,14 +1210,14 @@ Réponds uniquement en JSON.
             return
 
         title = str(
-            decision.get(
+            data.get(
                 "title",
                 "",
             )
         ).strip()
 
         description = str(
-            decision.get(
+            data.get(
                 "description",
                 "",
             )
@@ -1176,10 +1239,8 @@ Réponds uniquement en JSON.
             return
 
         route = self.router.route(
-            message=description,
-            available_workers=(
-                self.get_worker_names()
-            ),
+            description,
+            self.get_worker_names(),
         )
 
         assigned_agent = (
@@ -1192,8 +1253,8 @@ Réponds uniquement en JSON.
             self.missions.fail(
                 mission_id,
                 (
-                    "Aucun worker disponible "
-                    "pour l'étape suivante."
+                    "Aucun worker "
+                    "disponible."
                 ),
             )
 
@@ -1206,37 +1267,41 @@ Réponds uniquement en JSON.
             + 1
         )
 
-        task = self.tasks.create(
-            title=title,
-            description=description,
-            priority=self._safe_priority(
-                decision.get(
-                    "priority"
-                )
-            ),
-            deadline=(
-                mission.deadline
-            ),
-            assigned_agent=(
-                assigned_agent
-            ),
-            parent_task_id=(
-                completed_task.id
-            ),
-            metadata={
-                "mission_id": (
-                    mission_id
+        task = (
+            self.tasks.create(
+                title=title,
+                description=description,
+                priority=(
+                    self._safe_priority(
+                        data.get(
+                            "priority"
+                        )
+                    )
                 ),
-                "mission_step": (
-                    step_number
+                deadline=(
+                    mission.deadline
                 ),
-                "previous_task_id": (
+                assigned_agent=(
+                    assigned_agent
+                ),
+                parent_task_id=(
                     completed_task.id
                 ),
-                "previous_result": (
-                    previous_result
-                ),
-            },
+                depends_on=[
+                    completed_task.id
+                ],
+                metadata={
+                    "mission_id": (
+                        mission_id
+                    ),
+                    "mission_step": (
+                        step_number
+                    ),
+                    "previous_task_id": (
+                        completed_task.id
+                    ),
+                },
+            )
         )
 
         self.missions.add_task(
@@ -1244,35 +1309,20 @@ Réponds uniquement en JSON.
             task.id,
         )
 
-        self.event_bus.publish(
-            "task.created",
-            {
-                "task_id": task.id,
-                "mission_id": (
-                    mission_id
-                ),
-                "title": task.title,
-                "assigned_agent": (
-                    assigned_agent
-                ),
-            },
+        self.last_task_id = (
+            task.id
         )
 
-        submitted = (
-            self.worker_engine.submit(
-                task.id
-            )
+        self.worker_engine.submit(
+            task.id
         )
 
-        if not submitted:
-
-            self.missions.fail(
-                mission_id,
-                (
-                    "Impossible de lancer "
-                    "l'étape suivante."
-                ),
-            )
+        self.notifications.append(
+            f"→ Mission {mission_id}, "
+            f"étape {step_number} : "
+            f"{task.id} confiée à "
+            f"{assigned_agent}."
+        )
 
     # ========================================================
     # SESSION
@@ -1297,7 +1347,9 @@ Réponds uniquement en JSON.
         )
 
         if (
-            len(self.session_messages)
+            len(
+                self.session_messages
+            )
             > max_messages
         ):
 
@@ -1311,37 +1363,24 @@ Réponds uniquement en JSON.
         self,
     ) -> str:
 
-        if not self.session_messages:
-
-            return (
-                "(début d'une nouvelle session)"
-            )
-
-        lines = []
-
-        for message in (
-            self.session_messages[
-                -self.SESSION_HISTORY_LIMIT:
-            ]
+        if not (
+            self.session_messages
         ):
 
-            role = message.get(
-                "role",
-                "unknown",
-            )
-
-            content = message.get(
-                "content",
-                "",
-            )
-
-            lines.append(
-                f"{role.upper()} : "
-                f"{content}"
+            return (
+                "(début d'une "
+                "nouvelle session)"
             )
 
         return "\n".join(
-            lines
+            (
+                f"{item['role'].upper()} : "
+                f"{item['content']}"
+            )
+            for item
+            in self.session_messages[
+                -self.SESSION_HISTORY_LIMIT:
+            ]
         )
 
     # ========================================================
@@ -1351,9 +1390,14 @@ Réponds uniquement en JSON.
     @staticmethod
     def _parse_json(
         raw: str,
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
 
-        text = raw.strip()
+        text = (
+            raw.strip()
+        )
 
         try:
 
@@ -1391,14 +1435,14 @@ Réponds uniquement en JSON.
 
                 return {}
 
-        if not isinstance(
-            data,
-            dict,
-        ):
-
-            return {}
-
-        return data
+        return (
+            data
+            if isinstance(
+                data,
+                dict,
+            )
+            else {}
+        )
 
     @staticmethod
     def _safe_priority(
@@ -1410,16 +1454,19 @@ Réponds uniquement en JSON.
             or "normal"
         ).lower().strip()
 
-        if priority not in {
-            "low",
-            "normal",
-            "high",
-            "critical",
-        }:
+        if (
+            priority
+            in {
+                "low",
+                "normal",
+                "high",
+                "critical",
+            }
+        ):
 
-            return "normal"
+            return priority
 
-        return priority
+        return "normal"
 
     @staticmethod
     def _fallback_title(
@@ -1430,38 +1477,122 @@ Réponds uniquement en JSON.
             message.split()
         )
 
-        if len(title) > 80:
+        if len(title) <= 80:
+            return title
 
-            title = (
-                title[:77]
-                + "..."
-            )
-
-        return title
+        return (
+            title[:77]
+            + "..."
+        )
 
     def _fallback_worker(
         self,
     ) -> Optional[str]:
 
-        available = (
+        names = (
             self.get_worker_names()
         )
 
-        if "ai_worker" in available:
+        if (
+            "ai_worker"
+            in names
+        ):
+
             return "ai_worker"
 
-        if available:
-            return available[0]
+        if names:
+
+            return names[0]
 
         return None
 
     # ========================================================
-    # STATUS
+    # INSPECTION
     # ========================================================
+
+    def format_tasks(
+        self,
+        limit: int = 20,
+    ) -> str:
+
+        tasks = (
+            self.tasks.list()[
+                -limit:
+            ]
+        )
+
+        if not tasks:
+
+            return (
+                "Aucune tâche."
+            )
+
+        lines = []
+
+        for task in reversed(
+            tasks
+        ):
+
+            dependency = ""
+
+            if task.depends_on:
+
+                dependency = (
+                    " | dépend de "
+                    + ", ".join(
+                        task.depends_on
+                    )
+                )
+
+            lines.append(
+                f"{task.id} | "
+                f"{task.status} | "
+                f"{task.assigned_agent or '-'} | "
+                f"{task.title}"
+                f"{dependency}"
+            )
+
+        return "\n".join(
+            lines
+        )
+
+    def format_missions(
+        self,
+        limit: int = 20,
+    ) -> str:
+
+        missions = (
+            self.missions.list()[
+                -limit:
+            ]
+        )
+
+        if not missions:
+
+            return (
+                "Aucune mission."
+            )
+
+        return "\n".join(
+            (
+                f"{mission.id} | "
+                f"{mission.status} | "
+                f"{mission.title} | "
+                f"{len(mission.task_ids)} "
+                "étape(s)"
+            )
+            for mission
+            in reversed(
+                missions
+            )
+        )
 
     def status(
         self,
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
 
         tasks = (
             self.tasks.list()
@@ -1478,14 +1609,17 @@ Réponds uniquement en JSON.
             return len(
                 [
                     task
-                    for task in tasks
-                    if task.status
-                    == status
+                    for task
+                    in tasks
+                    if (
+                        task.status
+                        == status
+                    )
                 ]
             )
 
         def count_missions(
-            status: str,
+            status,
         ) -> int:
 
             return len(
@@ -1493,8 +1627,10 @@ Réponds uniquement en JSON.
                     mission
                     for mission
                     in missions
-                    if mission.status
-                    == status
+                    if (
+                        mission.status
+                        == status
+                    )
                 ]
             )
 
@@ -1507,64 +1643,102 @@ Réponds uniquement en JSON.
                     self.session_messages
                 )
             ),
+            "last_task_id": (
+                self.last_task_id
+            ),
             "tasks": {
-                "total": len(
-                    tasks
+                "total": (
+                    len(tasks)
                 ),
-                "pending": count_tasks(
-                    TaskStatus.PENDING
+                "pending": (
+                    count_tasks(
+                        TaskStatus
+                        .PENDING
+                        .value
+                    )
                 ),
-                "running": count_tasks(
-                    TaskStatus.RUNNING
+                "waiting_dependency": (
+                    count_tasks(
+                        TaskStatus
+                        .WAITING_DEPENDENCY
+                        .value
+                    )
+                ),
+                "running": (
+                    count_tasks(
+                        TaskStatus
+                        .RUNNING
+                        .value
+                    )
                 ),
                 "waiting_approval": (
                     count_tasks(
-                        TaskStatus.WAITING_APPROVAL
+                        TaskStatus
+                        .WAITING_APPROVAL
+                        .value
                     )
                 ),
-                "blocked": count_tasks(
-                    TaskStatus.BLOCKED
+                "blocked": (
+                    count_tasks(
+                        TaskStatus
+                        .BLOCKED
+                        .value
+                    )
                 ),
-                "completed": count_tasks(
-                    TaskStatus.COMPLETED
+                "completed": (
+                    count_tasks(
+                        TaskStatus
+                        .COMPLETED
+                        .value
+                    )
                 ),
-                "failed": count_tasks(
-                    TaskStatus.FAILED
+                "failed": (
+                    count_tasks(
+                        TaskStatus
+                        .FAILED
+                        .value
+                    )
                 ),
             },
             "missions": {
-                "total": len(
-                    missions
+                "total": (
+                    len(
+                        missions
+                    )
                 ),
                 "pending": (
                     count_missions(
-                        MissionStatus.PENDING
+                        MissionStatus
+                        .PENDING
                     )
                 ),
                 "running": (
                     count_missions(
-                        MissionStatus.RUNNING
+                        MissionStatus
+                        .RUNNING
                     )
                 ),
                 "completed": (
                     count_missions(
-                        MissionStatus.COMPLETED
+                        MissionStatus
+                        .COMPLETED
                     )
                 ),
                 "failed": (
                     count_missions(
-                        MissionStatus.FAILED
+                        MissionStatus
+                        .FAILED
                     )
                 ),
             },
-            "running_workers": list(
-                self.worker_engine.running.keys()
+            "running_workers": (
+                list(
+                    self.worker_engine
+                    .running
+                    .keys()
+                )
             ),
         }
-
-    # ========================================================
-    # SHUTDOWN
-    # ========================================================
 
     def shutdown(
         self,

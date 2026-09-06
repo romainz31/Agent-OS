@@ -1,19 +1,11 @@
 """
-Task Manager Agent-OS V2.
+Task Manager Agent-OS V2.2.
 
-Gestion centralisée et persistante des tâches.
-
-Une tâche possède notamment :
-- un identifiant
-- un titre
-- une description
-- un statut
-- une priorité
-- une échéance
-- un worker assigné
-- un résultat
-- une erreur éventuelle
-- des métadonnées
+Ajoute :
+- dépendances entre tâches ;
+- attente automatique des dépendances ;
+- résultats structurés ;
+- contexte provenant des tâches précédentes.
 """
 
 from __future__ import annotations
@@ -31,11 +23,8 @@ from v2.config import DATA_DIR
 
 
 class TaskStatus(str, Enum):
-    """
-    États possibles d'une tâche.
-    """
-
     PENDING = "pending"
+    WAITING_DEPENDENCY = "waiting_dependency"
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
     BLOCKED = "blocked"
@@ -46,10 +35,6 @@ class TaskStatus(str, Enum):
 
 @dataclass
 class Task:
-    """
-    Représentation d'une tâche Agent-OS.
-    """
-
     id: str
     title: str
     description: str
@@ -64,19 +49,15 @@ class Task:
     assigned_agent: Optional[str] = None
 
     result: Optional[str] = None
+    result_data: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
 
     parent_task_id: Optional[str] = None
+    depends_on: List[str] = field(default_factory=list)
 
-    metadata: Dict[str, Any] = field(
-        default_factory=dict
-    )
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """
-        Convertit la tâche en dictionnaire.
-        """
-
         return asdict(self)
 
     @classmethod
@@ -84,15 +65,55 @@ class Task:
         cls,
         data: Dict[str, Any],
     ) -> "Task":
-        """
-        Reconstruit une tâche depuis un dictionnaire.
-        """
+
+        legacy_metadata = dict(
+            data.get("metadata", {}) or {}
+        )
+
+        legacy_result_data = (
+            legacy_metadata.get(
+                "result_data",
+                {},
+            )
+        )
+
+        result_data = data.get(
+            "result_data",
+            legacy_result_data,
+        )
+
+        if not isinstance(
+            result_data,
+            dict,
+        ):
+            result_data = {}
+
+        depends_on = data.get(
+            "depends_on",
+            [],
+        )
+
+        if not isinstance(
+            depends_on,
+            list,
+        ):
+            depends_on = []
 
         return cls(
-            id=str(data["id"]),
-            title=str(data.get("title", "")),
+            id=str(
+                data["id"]
+            ),
+            title=str(
+                data.get(
+                    "title",
+                    "",
+                )
+            ),
             description=str(
-                data.get("description", "")
+                data.get(
+                    "description",
+                    "",
+                )
             ),
             status=str(
                 data.get(
@@ -118,33 +139,33 @@ class Task:
                     "",
                 )
             ),
-            deadline=data.get("deadline"),
+            deadline=data.get(
+                "deadline"
+            ),
             assigned_agent=data.get(
                 "assigned_agent"
             ),
-            result=data.get("result"),
-            error=data.get("error"),
+            result=data.get(
+                "result"
+            ),
+            result_data=result_data,
+            error=data.get(
+                "error"
+            ),
             parent_task_id=data.get(
                 "parent_task_id"
             ),
-            metadata=dict(
-                data.get(
-                    "metadata",
-                    {},
-                )
-            ),
+            depends_on=[
+                str(item)
+                for item
+                in depends_on
+                if item
+            ],
+            metadata=legacy_metadata,
         )
 
 
 class TaskManager:
-    """
-    Gestionnaire persistant des tâches.
-
-    Les tâches sont stockées dans :
-
-        data/v2/tasks/tasks.json
-    """
-
     PRIORITIES = {
         "low",
         "normal",
@@ -152,12 +173,21 @@ class TaskManager:
         "critical",
     }
 
+    TERMINAL_STATUSES = {
+        TaskStatus.COMPLETED.value,
+        TaskStatus.FAILED.value,
+        TaskStatus.CANCELLED.value,
+    }
+
     def __init__(
         self,
-        storage_path: Optional[Path] = None,
+        storage_path: Optional[
+            Path
+        ] = None,
     ) -> None:
 
         if storage_path is None:
+
             storage_path = (
                 DATA_DIR
                 / "tasks"
@@ -173,20 +203,23 @@ class TaskManager:
             exist_ok=True,
         )
 
-        self._tasks: Dict[str, Task] = {}
+        self._tasks: Dict[
+            str,
+            Task,
+        ] = {}
 
         self._load()
 
-    # ============================================================
+    # ========================================================
     # STORAGE
-    # ============================================================
+    # ========================================================
 
-    def _load(self) -> None:
-        """
-        Charge les tâches depuis le disque.
-        """
+    def _load(
+        self,
+    ) -> None:
 
         if not self.storage_path.exists():
+
             self._tasks = {}
             return
 
@@ -197,7 +230,9 @@ class TaskManager:
                 encoding="utf-8",
             ) as file:
 
-                data = json.load(file)
+                data = json.load(
+                    file
+                )
 
         except (
             OSError,
@@ -212,7 +247,11 @@ class TaskManager:
             self._tasks = {}
             return
 
-        if not isinstance(data, list):
+        if not isinstance(
+            data,
+            list,
+        ):
+
             self._tasks = {}
             return
 
@@ -232,7 +271,9 @@ class TaskManager:
                     item
                 )
 
-                self._tasks[task.id] = task
+                self._tasks[
+                    task.id
+                ] = task
 
             except (
                 KeyError,
@@ -242,16 +283,14 @@ class TaskManager:
 
                 continue
 
-    def _save(self) -> None:
-        """
-        Sauvegarde toutes les tâches.
-
-        Écriture atomique via fichier temporaire.
-        """
+    def _save(
+        self,
+    ) -> None:
 
         data = [
             task.to_dict()
-            for task in self._tasks.values()
+            for task
+            in self._tasks.values()
         ]
 
         temporary_path = (
@@ -276,15 +315,13 @@ class TaskManager:
             self.storage_path
         )
 
-    # ============================================================
+    # ========================================================
     # HELPERS
-    # ============================================================
+    # ========================================================
 
     @staticmethod
-    def _now() -> str:
-        """
-        Retourne l'heure UTC actuelle.
-        """
+    def _now(
+    ) -> str:
 
         return datetime.now(
             timezone.utc
@@ -294,62 +331,135 @@ class TaskManager:
         self,
         task: Task,
     ) -> None:
-        """
-        Met à jour updated_at.
-        """
 
-        task.updated_at = self._now()
+        task.updated_at = (
+            self._now()
+        )
 
     def _get_task_or_raise(
         self,
         task_id: str,
     ) -> Task:
 
-        task = self.get(task_id)
+        task = self.get(
+            task_id
+        )
 
         if task is None:
+
             raise ValueError(
-                f"Tâche introuvable : {task_id}"
+                "Tâche introuvable : "
+                f"{task_id}"
             )
 
         return task
 
-    # ============================================================
+    # ========================================================
     # CREATE
-    # ============================================================
+    # ========================================================
 
     def create(
         self,
         title: str,
         description: str,
         priority: str = "normal",
-        deadline: Optional[str] = None,
-        assigned_agent: Optional[str] = None,
-        parent_task_id: Optional[str] = None,
+        deadline: Optional[
+            str
+        ] = None,
+        assigned_agent: Optional[
+            str
+        ] = None,
+        parent_task_id: Optional[
+            str
+        ] = None,
+        depends_on: Optional[
+            List[str]
+        ] = None,
         metadata: Optional[
             Dict[str, Any]
         ] = None,
     ) -> Task:
-        """
-        Crée une nouvelle tâche.
-        """
 
-        if not title or not title.strip():
+        if (
+            not title
+            or not title.strip()
+        ):
+
             raise ValueError(
-                "Le titre de la tâche est obligatoire."
+                "Le titre de la tâche "
+                "est obligatoire."
             )
 
-        if priority not in self.PRIORITIES:
+        if (
+            priority
+            not in self.PRIORITIES
+        ):
+
             raise ValueError(
-                f"Priorité invalide : {priority}"
+                "Priorité invalide : "
+                f"{priority}"
             )
+
+        dependency_ids = []
+
+        for dependency_id in (
+            depends_on
+            or []
+        ):
+
+            dependency_id = str(
+                dependency_id
+            ).strip()
+
+            if (
+                dependency_id
+                and dependency_id
+                not in dependency_ids
+            ):
+
+                dependency_ids.append(
+                    dependency_id
+                )
+
+        for dependency_id in (
+            dependency_ids
+        ):
+
+            if (
+                dependency_id
+                not in self._tasks
+            ):
+
+                raise ValueError(
+                    "Dépendance introuvable : "
+                    f"{dependency_id}"
+                )
 
         now = self._now()
+
+        status = (
+            TaskStatus.PENDING.value
+        )
+
+        if (
+            dependency_ids
+            and not self.dependencies_satisfied_ids(
+                dependency_ids
+            )
+        ):
+
+            status = (
+                TaskStatus
+                .WAITING_DEPENDENCY
+                .value
+            )
 
         task = Task(
             id=(
                 "task_"
-                + uuid.uuid4().hex[:12]
+                + uuid.uuid4().hex[
+                    :12
+                ]
             ),
             title=title.strip(),
             description=(
@@ -357,47 +467,56 @@ class TaskManager:
                 if description
                 else ""
             ),
-            status=TaskStatus.PENDING.value,
+            status=status,
             priority=priority,
             created_at=now,
             updated_at=now,
             deadline=deadline,
-            assigned_agent=assigned_agent,
+            assigned_agent=(
+                assigned_agent
+            ),
             result=None,
+            result_data={},
             error=None,
-            parent_task_id=parent_task_id,
-            metadata=metadata or {},
+            parent_task_id=(
+                parent_task_id
+            ),
+            depends_on=(
+                dependency_ids
+            ),
+            metadata=(
+                metadata
+                or {}
+            ),
         )
 
-        self._tasks[task.id] = task
+        self._tasks[
+            task.id
+        ] = task
 
         self._save()
 
         return task
 
-    # ============================================================
+    # ========================================================
     # READ
-    # ============================================================
+    # ========================================================
 
     def get(
         self,
         task_id: str,
     ) -> Optional[Task]:
-        """
-        Retourne une tâche.
-        """
 
-        return self._tasks.get(task_id)
+        return self._tasks.get(
+            task_id
+        )
 
     def list(
         self,
-        status: Optional[str] = None,
+        status: Optional[
+            str
+        ] = None,
     ) -> List[Task]:
-        """
-        Retourne les tâches.
-
-        Si status est fourni, filtre sur ce statut.
-        """
 
         tasks = list(
             self._tasks.values()
@@ -407,27 +526,270 @@ class TaskManager:
 
             tasks = [
                 task
-                for task in tasks
-                if task.status == status
+                for task
+                in tasks
+                if (
+                    task.status
+                    == status
+                )
             ]
 
-        return tasks
+        return sorted(
+            tasks,
+            key=lambda task:
+            task.created_at,
+        )
 
-    # ============================================================
+    def latest(
+        self,
+    ) -> Optional[Task]:
+
+        tasks = self.list()
+
+        return (
+            tasks[-1]
+            if tasks
+            else None
+        )
+
+    def dependents_of(
+        self,
+        task_id: str,
+    ) -> List[Task]:
+
+        return [
+            task
+            for task
+            in self._tasks.values()
+            if (
+                task_id
+                in task.depends_on
+            )
+        ]
+
+    # ========================================================
+    # DEPENDENCIES
+    # ========================================================
+
+    def dependencies_satisfied_ids(
+        self,
+        dependency_ids: List[
+            str
+        ],
+    ) -> bool:
+
+        for dependency_id in (
+            dependency_ids
+        ):
+
+            dependency = self.get(
+                dependency_id
+            )
+
+            if dependency is None:
+                return False
+
+            if (
+                dependency.status
+                != TaskStatus
+                .COMPLETED
+                .value
+            ):
+
+                return False
+
+        return True
+
+    def dependencies_satisfied(
+        self,
+        task_id: str,
+    ) -> bool:
+
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
+        )
+
+        return (
+            self
+            .dependencies_satisfied_ids(
+                task.depends_on
+            )
+        )
+
+    def dependency_failure(
+        self,
+        task_id: str,
+    ) -> Optional[str]:
+
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
+        )
+
+        for dependency_id in (
+            task.depends_on
+        ):
+
+            dependency = self.get(
+                dependency_id
+            )
+
+            if dependency is None:
+
+                return (
+                    "Dépendance introuvable : "
+                    f"{dependency_id}"
+                )
+
+            if (
+                dependency.status
+                == TaskStatus
+                .FAILED
+                .value
+            ):
+
+                return (
+                    f"La dépendance "
+                    f"{dependency.id} "
+                    f"a échoué : "
+                    f"{dependency.error or 'erreur inconnue'}"
+                )
+
+            if (
+                dependency.status
+                == TaskStatus
+                .CANCELLED
+                .value
+            ):
+
+                return (
+                    f"La dépendance "
+                    f"{dependency.id} "
+                    "a été annulée."
+                )
+
+        return None
+
+    def build_dependency_context(
+        self,
+        task_id: str,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
+        )
+
+        context: List[
+            Dict[str, Any]
+        ] = []
+
+        for dependency_id in (
+            task.depends_on
+        ):
+
+            dependency = self.get(
+                dependency_id
+            )
+
+            if dependency is None:
+                continue
+
+            context.append(
+                {
+                    "task_id": (
+                        dependency.id
+                    ),
+                    "title": (
+                        dependency.title
+                    ),
+                    "worker": (
+                        dependency
+                        .assigned_agent
+                    ),
+                    "status": (
+                        dependency.status
+                    ),
+                    "result": (
+                        dependency.result
+                    ),
+                    "result_data": (
+                        dependency
+                        .result_data
+                    ),
+                }
+            )
+
+        return context
+
+    def mark_waiting_dependency(
+        self,
+        task_id: str,
+    ) -> Task:
+
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
+        )
+
+        task.status = (
+            TaskStatus
+            .WAITING_DEPENDENCY
+            .value
+        )
+
+        self._touch(
+            task
+        )
+
+        self._save()
+
+        return task
+
+    def mark_pending(
+        self,
+        task_id: str,
+    ) -> Task:
+
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
+        )
+
+        task.status = (
+            TaskStatus.PENDING.value
+        )
+
+        self._touch(
+            task
+        )
+
+        self._save()
+
+        return task
+
+    # ========================================================
     # UPDATE
-    # ============================================================
+    # ========================================================
 
     def update(
         self,
         task_id: str,
         **changes: Any,
     ) -> Task:
-        """
-        Modifie les champs d'une tâche.
-        """
 
-        task = self._get_task_or_raise(
-            task_id
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
         )
 
         allowed_fields = {
@@ -438,24 +800,38 @@ class TaskManager:
             "deadline",
             "assigned_agent",
             "result",
+            "result_data",
             "error",
             "parent_task_id",
+            "depends_on",
             "metadata",
         }
 
-        for key, value in changes.items():
+        for (
+            key,
+            value,
+        ) in changes.items():
 
-            if key not in allowed_fields:
+            if (
+                key
+                not in allowed_fields
+            ):
+
                 raise ValueError(
-                    f"Champ de tâche inconnu : {key}"
+                    "Champ de tâche "
+                    f"inconnu : {key}"
                 )
 
-            if key == "priority":
+            if (
+                key == "priority"
+                and value
+                not in self.PRIORITIES
+            ):
 
-                if value not in self.PRIORITIES:
-                    raise ValueError(
-                        f"Priorité invalide : {value}"
-                    )
+                raise ValueError(
+                    "Priorité invalide : "
+                    f"{value}"
+                )
 
             setattr(
                 task,
@@ -463,37 +839,80 @@ class TaskManager:
                 value,
             )
 
-        self._touch(task)
+        self._touch(
+            task
+        )
+
         self._save()
 
         return task
 
-    # ============================================================
-    # STATUS TRANSITIONS
-    # ============================================================
+    # ========================================================
+    # STATUS
+    # ========================================================
 
     def start(
         self,
         task_id: str,
     ) -> Task:
-        """
-        Passe une tâche à running.
-        """
 
-        task = self._get_task_or_raise(
-            task_id
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
         )
 
-        if task.status != TaskStatus.PENDING.value:
+        if (
+            task.status
+            not in {
+                TaskStatus
+                .PENDING
+                .value,
+                TaskStatus
+                .WAITING_DEPENDENCY
+                .value,
+            }
+        ):
+
             raise ValueError(
                 "Seules les tâches pending "
+                "ou waiting_dependency "
                 "peuvent démarrer."
             )
 
-        task.status = TaskStatus.RUNNING.value
+        failure = (
+            self.dependency_failure(
+                task_id
+            )
+        )
+
+        if failure:
+
+            raise ValueError(
+                failure
+            )
+
+        if not (
+            self.dependencies_satisfied(
+                task_id
+            )
+        ):
+
+            raise ValueError(
+                "Les dépendances ne sont "
+                "pas encore terminées."
+            )
+
+        task.status = (
+            TaskStatus.RUNNING.value
+        )
+
         task.error = None
 
-        self._touch(task)
+        self._touch(
+            task
+        )
+
         self._save()
 
         return task
@@ -501,26 +920,33 @@ class TaskManager:
     def wait_for_approval(
         self,
         task_id: str,
-        reason: Optional[str] = None,
+        reason: Optional[
+            str
+        ] = None,
     ) -> Task:
-        """
-        Place une tâche en attente d'approbation.
-        """
 
-        task = self._get_task_or_raise(
-            task_id
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
         )
 
         task.status = (
-            TaskStatus.WAITING_APPROVAL.value
+            TaskStatus
+            .WAITING_APPROVAL
+            .value
         )
 
         if reason:
+
             task.metadata[
                 "approval_reason"
             ] = reason
 
-        self._touch(task)
+        self._touch(
+            task
+        )
+
         self._save()
 
         return task
@@ -528,14 +954,15 @@ class TaskManager:
     def block(
         self,
         task_id: str,
-        reason: Optional[str] = None,
+        reason: Optional[
+            str
+        ] = None,
     ) -> Task:
-        """
-        Bloque une tâche.
-        """
 
-        task = self._get_task_or_raise(
-            task_id
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
         )
 
         task.status = (
@@ -545,7 +972,10 @@ class TaskManager:
         if reason:
             task.error = reason
 
-        self._touch(task)
+        self._touch(
+            task
+        )
+
         self._save()
 
         return task
@@ -553,35 +983,39 @@ class TaskManager:
     def complete(
         self,
         task_id: str,
-        result: Optional[str] = None,
+        result: Optional[
+            str
+        ] = None,
         data: Optional[
             Dict[str, Any]
         ] = None,
     ) -> Task:
-        """
-        Termine une tâche avec succès.
 
-        Le message principal est stocké dans result.
-        Les données structurées sont stockées dans metadata.
-        """
-
-        task = self._get_task_or_raise(
-            task_id
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
         )
 
         task.status = (
-            TaskStatus.COMPLETED.value
+            TaskStatus
+            .COMPLETED
+            .value
         )
 
         task.result = result
+
+        task.result_data = (
+            data
+            or {}
+        )
+
         task.error = None
 
-        if data is not None:
-            task.metadata[
-                "result_data"
-            ] = data
+        self._touch(
+            task
+        )
 
-        self._touch(task)
         self._save()
 
         return task
@@ -589,14 +1023,15 @@ class TaskManager:
     def fail(
         self,
         task_id: str,
-        error: Optional[str] = None,
+        error: Optional[
+            str
+        ] = None,
     ) -> Task:
-        """
-        Marque une tâche comme échouée.
-        """
 
-        task = self._get_task_or_raise(
-            task_id
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
         )
 
         task.status = (
@@ -605,7 +1040,10 @@ class TaskManager:
 
         task.error = error
 
-        self._touch(task)
+        self._touch(
+            task
+        )
+
         self._save()
 
         return task
@@ -614,72 +1052,75 @@ class TaskManager:
         self,
         task_id: str,
     ) -> Task:
-        """
-        Annule une tâche.
-        """
 
-        task = self._get_task_or_raise(
-            task_id
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
         )
 
         task.status = (
-            TaskStatus.CANCELLED.value
+            TaskStatus
+            .CANCELLED
+            .value
         )
 
-        self._touch(task)
+        self._touch(
+            task
+        )
+
         self._save()
 
         return task
 
-    # ============================================================
-    # RESULT
-    # ============================================================
-
     def set_result(
         self,
         task_id: str,
-        result: Optional[str],
+        result: Optional[
+            str
+        ],
         data: Optional[
             Dict[str, Any]
         ] = None,
     ) -> Task:
-        """
-        Enregistre un résultat sans modifier
-        automatiquement le statut.
-        """
 
-        task = self._get_task_or_raise(
-            task_id
+        task = (
+            self._get_task_or_raise(
+                task_id
+            )
         )
 
         task.result = result
 
         if data is not None:
-            task.metadata[
-                "result_data"
-            ] = data
 
-        self._touch(task)
+            task.result_data = (
+                data
+            )
+
+        self._touch(
+            task
+        )
+
         self._save()
 
         return task
-
-    # ============================================================
-    # DELETE
-    # ============================================================
 
     def delete(
         self,
         task_id: str,
     ) -> bool:
-        """
-        Supprime une tâche.
-        """
 
-        if task_id not in self._tasks:
+        if (
+            task_id
+            not in self._tasks
+        ):
+
             return False
 
-        del self._tasks[task_id]
+        del self._tasks[
+            task_id
+        ]
 
         self._save()
 

@@ -1,11 +1,16 @@
 """
-Point d'entrée Agent-OS V2.
+Point d'entrée Agent-OS V2.2.
 
-Permet de tester le Manager,
-les missions et les workers spécialisés.
+Commandes :
+- status
+- tasks
+- missions
+- quit
 """
 
-from v2.manager.manager import Manager
+from v2.manager.manager import (
+    Manager,
+)
 
 from v2.workers.llm_worker import (
     LLMWorker,
@@ -17,16 +22,16 @@ from v2.workers.worker import (
 )
 
 
-class DemoWorker(Worker):
-    """
-    Worker de test.
-    """
+class DemoWorker(
+    Worker
+):
 
     name = "demo"
 
     description = (
-        "Worker de démonstration utilisé "
-        "pour tester le système."
+        "Worker de démonstration "
+        "utilisé pour tester "
+        "le système."
     )
 
     def execute(
@@ -42,46 +47,70 @@ class DemoWorker(Worker):
         )
 
         print(
-            f"\n[DEMO WORKER] "
-            f"Travail commencé : {title}"
+            "\n[DEMO WORKER] "
+            f"Travail commencé : "
+            f"{title}"
         )
 
-        time.sleep(5)
+        time.sleep(
+            2
+        )
 
         print(
-            f"[DEMO WORKER] "
-            f"Travail terminé : {title}"
+            "[DEMO WORKER] "
+            f"Travail terminé : "
+            f"{title}"
         )
 
         return WorkerResult(
             success=True,
             message=(
-                f"Le worker a terminé : {title}"
+                "Le worker a terminé : "
+                f"{title}"
             ),
             data={
-                "worker": self.name,
+                "worker": (
+                    self.name
+                ),
                 "type": "demo",
             },
         )
 
 
-def main() -> None:
+def show_notifications(
+    manager: Manager,
+) -> None:
 
-    print("=" * 60)
+    for notification in (
+        manager.drain_notifications()
+    ):
+
+        print(
+            "\n[MANAGER] "
+            f"{notification}"
+        )
+
+
+def main(
+) -> None:
 
     print(
-        "AGENT-OS V2 — MANAGER"
+        "=" * 60
     )
 
-    print("=" * 60)
+    print(
+        "AGENT-OS V2.2 — MANAGER"
+    )
+
+    print(
+        "=" * 60
+    )
 
     print()
 
-    manager = Manager()
-
-    # ============================================================
-    # WORKERS
-    # ============================================================
+    manager = (
+        Manager()
+    )
 
     manager.register_worker(
         DemoWorker()
@@ -90,10 +119,6 @@ def main() -> None:
     manager.register_worker(
         LLMWorker()
     )
-
-    # IMPORTANT :
-    # Les trois workers spécialisés utilisent
-    # actuellement le LLM local.
 
     from v2.workers.researcher import (
         ResearcherWorker,
@@ -119,10 +144,6 @@ def main() -> None:
         TesterWorker()
     )
 
-    # ============================================================
-    # INTERFACE
-    # ============================================================
-
     print(
         "Manager prêt."
     )
@@ -133,7 +154,8 @@ def main() -> None:
     )
 
     print(
-        "Tape 'quit' pour quitter."
+        "Commandes : "
+        "status | tasks | missions | quit"
     )
 
     print()
@@ -141,6 +163,10 @@ def main() -> None:
     try:
 
         while True:
+
+            show_notifications(
+                manager
+            )
 
             try:
 
@@ -152,51 +178,109 @@ def main() -> None:
 
                 break
 
+            command = (
+                message
+                .strip()
+                .lower()
+            )
+
             if (
-                message.strip().lower()
+                command
                 == "quit"
             ):
 
                 break
 
-            if not message.strip():
+            if not command:
+                continue
+
+            if (
+                command
+                == "status"
+            ):
+
+                print()
+
+                print(
+                    manager.status()
+                )
+
+                print()
 
                 continue
 
-            response = manager.chat(
-                message
+            if (
+                command
+                == "tasks"
+            ):
+
+                print()
+
+                print(
+                    manager.format_tasks()
+                )
+
+                print()
+
+                continue
+
+            if (
+                command
+                == "missions"
+            ):
+
+                print()
+
+                print(
+                    manager.format_missions()
+                )
+
+                print()
+
+                continue
+
+            response = (
+                manager.chat(
+                    message
+                )
             )
 
             print()
 
             print(
-                f"MANAGER > {response}"
+                "MANAGER >"
+            )
+
+            print(
+                response
             )
 
             print()
 
+            show_notifications(
+                manager
+            )
+
     except KeyboardInterrupt:
 
-        print()
-
         print(
-            "Arrêt demandé."
+            "\nArrêt demandé."
         )
 
     finally:
 
-        print()
-
         print(
-            "Arrêt du Manager..."
+            "\nArrêt du Manager..."
         )
 
         manager.shutdown()
 
-        print()
+        show_notifications(
+            manager
+        )
 
         print(
-            "STATUS FINAL :"
+            "\nSTATUS FINAL :"
         )
 
         print(
