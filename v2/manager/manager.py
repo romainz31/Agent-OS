@@ -1,5 +1,5 @@
 """
-Manager principal Agent-OS V2.2.1.
+Manager principal Agent-OS V2.3.1.
 
 Ajoute :
 - dépendances entre tâches ;
@@ -7,7 +7,8 @@ Ajoute :
 - notifications de fin ;
 - transmission automatique du résultat entre étapes ;
 - affichage explicite task/worker/status ;
-- plan déterministe pour les missions multi-agents.
+- plan déterministe pour les missions multi-agents ;
+- correction de la détection des références "ça" / "ca".
 """
 
 from __future__ import annotations
@@ -81,8 +82,6 @@ class Manager:
         "cette solution",
         "ce résultat",
         "ce resultat",
-        "ça",
-        "ca",
         "celui-ci",
         "celle-ci",
         "le précédent",
@@ -91,6 +90,11 @@ class Manager:
         "la precedente",
         "ce qu'il a fait",
         "ce qu’elle a fait",
+    )
+
+    REFERENCE_WORDS = (
+        "ça",
+        "ca",
     )
 
     def __init__(
@@ -1057,10 +1061,25 @@ JSON uniquement.
             message.lower()
         )
 
-        if any(
+        phrase_reference = any(
             marker in lower
             for marker
             in self.REFERENCE_MARKERS
+        )
+
+        word_reference = any(
+            re.search(
+                rf"(?<!\w){re.escape(word)}(?!\w)",
+                lower,
+            )
+            is not None
+            for word
+            in self.REFERENCE_WORDS
+        )
+
+        if (
+            phrase_reference
+            or word_reference
         ):
 
             if self.tasks.get(

@@ -1,19 +1,12 @@
 """
 Routeur déterministe du Manager Agent-OS V2.3.1.
 
-Le LLM ne décide pas seul si une demande est :
+Python décide d'abord si une demande est :
 - une conversation ;
 - une tâche ;
 - une mission.
 
-Python effectue d'abord un routage stable.
-
-Correction V2.3.1 :
-- les demandes de conception technique ;
-- architecture ;
-- design logiciel ;
-- structure applicative ;
-sont explicitement routées vers le Developer.
+Il sélectionne également le worker spécialisé.
 """
 
 from __future__ import annotations
@@ -36,12 +29,6 @@ class RouteDecision:
 class ManagerRouter:
     """
     Routeur principal du Manager.
-
-    Il détermine :
-    - conversation ;
-    - tâche ;
-    - mission ;
-    - worker spécialisé.
     """
 
     MISSION_MARKERS = (
@@ -115,12 +102,6 @@ class ManagerRouter:
         "structure applicative",
         "organise le code",
         "organiser le code",
-        "crée le fichier",
-        "créé le fichier",
-        "modifie le code",
-        "modifier le code",
-        "corrige le code",
-        "corriger le code",
     )
 
     TESTER_KEYWORDS = (
@@ -153,6 +134,8 @@ class ManagerRouter:
         "faire",
         "crée",
         "créer",
+        "cree",
+        "creer",
         "conçois",
         "concevoir",
         "prépare",
@@ -171,6 +154,12 @@ class ManagerRouter:
         "organiser",
         "planifie",
         "planifier",
+        "modifie",
+        "modifier",
+        "corrige",
+        "corriger",
+        "ajoute",
+        "ajouter",
     )
 
     CONVERSATION_PREFIXES = (
@@ -186,14 +175,47 @@ class ManagerRouter:
         "tu vas bien",
     )
 
+    FILE_ACTIONS = (
+        "crée",
+        "créer",
+        "cree",
+        "creer",
+        "modifie",
+        "modifier",
+        "corrige",
+        "corriger",
+        "ajoute",
+        "ajouter",
+        "supprime",
+        "supprimer",
+        "écris",
+        "écrire",
+    )
+
+    FILE_MARKERS = (
+        "fichier",
+        ".py",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".md",
+        ".txt",
+        ".toml",
+        ".ini",
+        ".env",
+        "v2/",
+        "v2\\",
+        "agents/",
+        "agents\\",
+        "docs/",
+        "docs\\",
+    )
+
     def route(
         self,
         message: str,
         available_workers: Iterable[str],
     ) -> RouteDecision:
-        """
-        Route un message.
-        """
 
         text = " ".join(
             message.lower().strip().split()
@@ -209,9 +231,9 @@ class ManagerRouter:
                 reason="message vide",
             )
 
-        # ========================================================
+        # ====================================================
         # MISSION
-        # ========================================================
+        # ====================================================
 
         if self._is_mission(
             text
@@ -232,9 +254,29 @@ class ManagerRouter:
                 ),
             )
 
-        # ========================================================
+        # ====================================================
+        # FICHIER / CODE
+        # ====================================================
+
+        if (
+            "developer" in available
+            and self._looks_like_file_task(
+                text
+            )
+        ):
+
+            return RouteDecision(
+                action="create_task",
+                worker="developer",
+                reason=(
+                    "action sur fichier "
+                    "ou code détectée"
+                ),
+            )
+
+        # ====================================================
         # WORKER SPÉCIALISÉ
-        # ========================================================
+        # ====================================================
 
         worker = (
             self._infer_worker(
@@ -254,9 +296,9 @@ class ManagerRouter:
                 ),
             )
 
-        # ========================================================
+        # ====================================================
         # TRAVAIL GÉNÉRAL
-        # ========================================================
+        # ====================================================
 
         if self._looks_like_work(
             text
@@ -268,9 +310,7 @@ class ManagerRouter:
                 "ai_worker"
                 in available
             ):
-                fallback = (
-                    "ai_worker"
-                )
+                fallback = "ai_worker"
 
             return RouteDecision(
                 action="create_task",
@@ -281,24 +321,19 @@ class ManagerRouter:
                 ),
             )
 
-        # ========================================================
+        # ====================================================
         # CONVERSATION
-        # ========================================================
+        # ====================================================
 
         return RouteDecision(
             action="conversation",
-            reason=(
-                "conversation détectée"
-            ),
+            reason="conversation détectée",
         )
 
     def _is_mission(
         self,
         text: str,
     ) -> bool:
-        """
-        Détecte une demande multi-étapes.
-        """
 
         marker_count = sum(
             1
@@ -307,9 +342,7 @@ class ManagerRouter:
             if marker in text
         )
 
-        if (
-            marker_count >= 2
-        ):
+        if marker_count >= 2:
             return True
 
         chained_patterns = (
@@ -333,14 +366,35 @@ class ManagerRouter:
             in chained_patterns
         )
 
+    def _looks_like_file_task(
+        self,
+        text: str,
+    ) -> bool:
+        """
+        Détecte une action technique portant
+        explicitement sur un fichier.
+        """
+
+        has_action = any(
+            action in text
+            for action
+            in self.FILE_ACTIONS
+        )
+
+        if not has_action:
+            return False
+
+        return any(
+            marker in text
+            for marker
+            in self.FILE_MARKERS
+        )
+
     def _infer_worker(
         self,
         text: str,
         available: set[str],
     ) -> Optional[str]:
-        """
-        Détermine le worker le plus pertinent.
-        """
 
         scores = {
             "tester": self._score(
@@ -373,28 +427,17 @@ class ManagerRouter:
 
         for worker in priority:
 
-            if (
-                worker
-                not in available
-            ):
+            if worker not in available:
                 continue
 
-            score = (
-                scores[worker]
-            )
+            score = scores[
+                worker
+            ]
 
-            if (
-                score
-                > best_score
-            ):
+            if score > best_score:
 
-                best_worker = (
-                    worker
-                )
-
-                best_score = (
-                    score
-                )
+                best_worker = worker
+                best_score = score
 
         return best_worker
 
@@ -403,14 +446,8 @@ class ManagerRouter:
         text: str,
         available: set[str],
     ) -> Optional[str]:
-        """
-        Détermine le worker
-        de la première étape.
-        """
 
-        first_part = (
-            text
-        )
+        first_part = text
 
         separators = (
             " ensuite ",
@@ -422,46 +459,42 @@ class ManagerRouter:
 
         indexes = []
 
-        for separator in (
-            separators
-        ):
+        for separator in separators:
 
-            index = (
-                text.find(
-                    separator
-                )
+            index = text.find(
+                separator
             )
 
-            if (
-                index != -1
-            ):
+            if index != -1:
                 indexes.append(
                     index
                 )
 
         if indexes:
 
-            first_part = (
-                text[
-                    :min(indexes)
-                ]
-            )
+            first_part = text[
+                :min(indexes)
+            ]
 
-        return (
-            self._infer_worker(
-                first_part,
-                available,
-            )
+        if self._looks_like_file_task(
+            first_part
+        ):
+
+            if (
+                "developer"
+                in available
+            ):
+                return "developer"
+
+        return self._infer_worker(
+            first_part,
+            available,
         )
 
     def _looks_like_work(
         self,
         text: str,
     ) -> bool:
-        """
-        Détecte une demande générale
-        de travail.
-        """
 
         if any(
             text.startswith(
@@ -470,7 +503,6 @@ class ManagerRouter:
             for prefix
             in self.CONVERSATION_PREFIXES
         ):
-
             return False
 
         return any(
@@ -482,14 +514,8 @@ class ManagerRouter:
     @staticmethod
     def _score(
         text: str,
-        keywords: tuple[
-            str,
-            ...
-        ],
+        keywords: tuple[str, ...],
     ) -> int:
-        """
-        Score simple par mots-clés.
-        """
 
         return sum(
             1

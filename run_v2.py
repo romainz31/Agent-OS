@@ -1,5 +1,5 @@
 """
-Point d'entrée Agent-OS V2.3.
+Point d'entrée Agent-OS V2.3.1.
 
 Commandes :
 - status
@@ -26,9 +26,7 @@ class DemoWorker(
     Worker
 ):
 
-    name = (
-        "demo"
-    )
+    name = "demo"
 
     description = (
         "Worker de démonstration "
@@ -43,17 +41,14 @@ class DemoWorker(
 
         import time
 
-        title = (
-            task.get(
-                "title",
-                "Tâche inconnue",
-            )
+        title = task.get(
+            "title",
+            "Tâche inconnue",
         )
 
         print(
             "\n[DEMO WORKER] "
-            f"Travail commencé : "
-            f"{title}"
+            f"Travail commencé : {title}"
         )
 
         time.sleep(
@@ -62,8 +57,7 @@ class DemoWorker(
 
         print(
             "[DEMO WORKER] "
-            f"Travail terminé : "
-            f"{title}"
+            f"Travail terminé : {title}"
         )
 
         return WorkerResult(
@@ -73,12 +67,8 @@ class DemoWorker(
                 f"{title}"
             ),
             data={
-                "worker": (
-                    self.name
-                ),
-                "type": (
-                    "demo"
-                ),
+                "worker": self.name,
+                "type": "demo",
             },
         )
 
@@ -97,15 +87,14 @@ def show_notifications(
         )
 
 
-def main(
-) -> None:
+def main() -> None:
 
     print(
         "=" * 60
     )
 
     print(
-        "AGENT-OS V2.3 — MANAGER"
+        "AGENT-OS V2.3.1 — MANAGER"
     )
 
     print(
@@ -151,7 +140,11 @@ def main(
     )
 
     manager.register_worker(
-        DeveloperWorker()
+        DeveloperWorker(
+            permissions=(
+                manager.permissions
+            )
+        )
     )
 
     manager.register_worker(
@@ -210,7 +203,6 @@ def main(
                 break
 
             if not command:
-
                 continue
 
             if (
@@ -307,8 +299,6 @@ def main(
         )
 
 
-if __name__ == (
-    "__main__"
-):
+if __name__ == "__main__":
 
     main()
