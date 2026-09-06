@@ -93,41 +93,16 @@ class Manager:
         "ce qu’elle a fait",
     )
 
-    MISSION_SPLIT_PATTERNS = (
-        r"\bd'abord\b",
-        r"\bensuite\b",
-        r"\bpuis\b",
-        r"\benfin\b",
-        r"\baprès\b",
-        r"\bapres\b",
-    )
-
     def __init__(
         self,
-        llm: Optional[
-            LLM
-        ] = None,
-        memory: Optional[
-            MemoryStore
-        ] = None,
-        tasks: Optional[
-            TaskManager
-        ] = None,
-        missions: Optional[
-            MissionManager
-        ] = None,
-        permissions: Optional[
-            PermissionEngine
-        ] = None,
-        event_bus: Optional[
-            EventBus
-        ] = None,
-        worker_engine: Optional[
-            WorkerEngine
-        ] = None,
-        router: Optional[
-            ManagerRouter
-        ] = None,
+        llm: Optional[LLM] = None,
+        memory: Optional[MemoryStore] = None,
+        tasks: Optional[TaskManager] = None,
+        missions: Optional[MissionManager] = None,
+        permissions: Optional[PermissionEngine] = None,
+        event_bus: Optional[EventBus] = None,
+        worker_engine: Optional[WorkerEngine] = None,
+        router: Optional[ManagerRouter] = None,
     ) -> None:
 
         self.llm = (
@@ -166,12 +141,8 @@ class Manager:
         self.worker_engine = (
             worker_engine
             or WorkerEngine(
-                task_manager=(
-                    self.tasks
-                ),
-                event_bus=(
-                    self.event_bus
-                ),
+                task_manager=self.tasks,
+                event_bus=self.event_bus,
             )
         )
 
@@ -235,9 +206,7 @@ class Manager:
     ) -> list[str]:
 
         return list(
-            self.worker_engine
-            .workers
-            .keys()
+            self.worker_engine.workers.keys()
         )
 
     def list_workers(
@@ -249,21 +218,17 @@ class Manager:
         return [
             {
                 "name": name,
-                "description": (
-                    getattr(
-                        worker,
-                        "description",
-                        "",
-                    )
+                "description": getattr(
+                    worker,
+                    "description",
+                    "",
                 ),
             }
             for (
                 name,
                 worker,
             )
-            in self.worker_engine
-            .workers
-            .items()
+            in self.worker_engine.workers.items()
         ]
 
     # ========================================================
@@ -275,24 +240,19 @@ class Manager:
         message: str,
     ) -> str:
 
-        message = (
-            message.strip()
-        )
+        message = message.strip()
 
         if not message:
 
             return (
-                "Je n'ai reçu "
-                "aucun message."
+                "Je n'ai reçu aucun message."
             )
 
-        route = (
-            self.router.route(
-                message=message,
-                available_workers=(
-                    self.get_worker_names()
-                ),
-            )
+        route = self.router.route(
+            message=message,
+            available_workers=(
+                self.get_worker_names()
+            ),
         )
 
         long_term_context = (
@@ -342,8 +302,8 @@ class Manager:
         except LLMError as exc:
 
             response = (
-                "Je n'arrive pas à "
-                "contacter le modèle local.\n"
+                "Je n'arrive pas à contacter "
+                "le modèle local.\n"
                 f"Détail : {exc}"
             )
 
@@ -634,8 +594,7 @@ JSON uniquement.
         if not assigned_agent:
 
             return (
-                "Aucun worker "
-                "n'est disponible."
+                "Aucun worker n'est disponible."
             )
 
         dependencies = (
@@ -644,34 +603,32 @@ JSON uniquement.
             )
         )
 
-        task = (
-            self.tasks.create(
-                title=(
-                    decision.title
-                    or self._fallback_title(
-                        original_message
-                    )
-                ),
-                description=(
-                    decision.description
-                    or original_message
-                ),
-                priority=(
-                    decision.priority
-                ),
-                deadline=(
-                    decision.deadline
-                ),
-                assigned_agent=(
-                    assigned_agent
-                ),
-                depends_on=(
-                    dependencies
-                ),
-                metadata=(
-                    decision.metadata
-                ),
-            )
+        task = self.tasks.create(
+            title=(
+                decision.title
+                or self._fallback_title(
+                    original_message
+                )
+            ),
+            description=(
+                decision.description
+                or original_message
+            ),
+            priority=(
+                decision.priority
+            ),
+            deadline=(
+                decision.deadline
+            ),
+            assigned_agent=(
+                assigned_agent
+            ),
+            depends_on=(
+                dependencies
+            ),
+            metadata=(
+                decision.metadata
+            ),
         )
 
         self.last_task_id = (
@@ -681,12 +638,8 @@ JSON uniquement.
         self.event_bus.publish(
             "task.created",
             {
-                "task_id": (
-                    task.id
-                ),
-                "title": (
-                    task.title
-                ),
+                "task_id": task.id,
+                "title": task.title,
                 "assigned_agent": (
                     assigned_agent
                 ),
@@ -822,8 +775,8 @@ JSON uniquement.
 
             return (
                 f"Mission {mission.id} "
-                "créée mais aucun "
-                "worker n'est disponible."
+                "créée mais aucun worker "
+                "n'est disponible."
             )
 
         first_description = (
@@ -877,15 +830,11 @@ JSON uniquement.
         self.event_bus.publish(
             "task.created",
             {
-                "task_id": (
-                    task.id
-                ),
+                "task_id": task.id,
                 "mission_id": (
                     mission.id
                 ),
-                "title": (
-                    task.title
-                ),
+                "title": task.title,
                 "assigned_agent": (
                     assigned_agent
                 ),
@@ -929,9 +878,11 @@ JSON uniquement.
 
             return []
 
+        # "d'abord" appartient à la première étape.
+        # On ne découpe qu'à partir des transitions suivantes.
         split_pattern = (
             r"\s*(?:,|\bet\b)?\s*"
-            r"(?:d'abord|ensuite|puis|enfin|après|apres)"
+            r"(?:ensuite|puis|enfin|après|apres)"
             r"\s+"
         )
 
@@ -1172,8 +1123,10 @@ JSON uniquement.
         if not task_id:
             return
 
-        task = self.tasks.get(
-            task_id
+        task = (
+            self.tasks.get(
+                task_id
+            )
         )
 
         if task is None:
@@ -1202,8 +1155,7 @@ JSON uniquement.
                             task.id
                         ),
                         "worker": (
-                            task
-                            .assigned_agent
+                            task.assigned_agent
                         ),
                     },
                 )
@@ -1239,8 +1191,10 @@ JSON uniquement.
         if not task_id:
             return
 
-        task = self.tasks.get(
-            task_id
+        task = (
+            self.tasks.get(
+                task_id
+            )
         )
 
         if task:
@@ -1583,9 +1537,7 @@ JSON uniquement.
         self,
     ) -> str:
 
-        if not (
-            self.session_messages
-        ):
+        if not self.session_messages:
 
             return (
                 "(début d'une "
@@ -1627,12 +1579,16 @@ JSON uniquement.
 
         except json.JSONDecodeError:
 
-            start = text.find(
-                "{"
+            start = (
+                text.find(
+                    "{"
+                )
             )
 
-            end = text.rfind(
-                "}"
+            end = (
+                text.rfind(
+                    "}"
+                )
             )
 
             if (
@@ -1693,11 +1649,14 @@ JSON uniquement.
         message: str,
     ) -> str:
 
-        title = " ".join(
-            message.split()
+        title = (
+            " ".join(
+                message.split()
+            )
         )
 
         if len(title) <= 80:
+
             return title
 
         return (
@@ -1852,10 +1811,7 @@ JSON uniquement.
                     task
                     for task
                     in tasks
-                    if (
-                        task.status
-                        == status
-                    )
+                    if task.status == status
                 ]
             )
 
@@ -1868,10 +1824,8 @@ JSON uniquement.
                     mission
                     for mission
                     in missions
-                    if (
-                        mission.status
-                        == status
-                    )
+                    if mission.status
+                    == status
                 ]
             )
 
@@ -1949,26 +1903,22 @@ JSON uniquement.
                 ),
                 "pending": (
                     count_missions(
-                        MissionStatus
-                        .PENDING
+                        MissionStatus.PENDING
                     )
                 ),
                 "running": (
                     count_missions(
-                        MissionStatus
-                        .RUNNING
+                        MissionStatus.RUNNING
                     )
                 ),
                 "completed": (
                     count_missions(
-                        MissionStatus
-                        .COMPLETED
+                        MissionStatus.COMPLETED
                     )
                 ),
                 "failed": (
                     count_missions(
-                        MissionStatus
-                        .FAILED
+                        MissionStatus.FAILED
                     )
                 ),
             },
