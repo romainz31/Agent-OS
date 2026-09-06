@@ -1,21 +1,33 @@
 """
-Mémoire Agent-OS V2.
+Mémoire Agent-OS V2.1.
 
-La mémoire est séparée en plusieurs catégories :
+Principe important :
 
-- conversation
-- personal
-- emotional
-- tasks
-- knowledge
+La conversation courante n'est PAS une mémoire longue durée.
+
+La mémoire persistante contient uniquement :
+- informations personnelles ;
+- contexte émotionnel utile ;
+- tâches importantes ;
+- connaissances.
+
+La conversation active est conservée par le Manager
+uniquement pendant la session.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import uuid
-from datetime import datetime, timezone
+
+from datetime import (
+    datetime,
+    timezone,
+)
+
 from pathlib import Path
+
 from typing import Any
 
 from v2.config import MEMORY_DIR
@@ -23,9 +35,7 @@ from v2.config import MEMORY_DIR
 
 class MemoryStore:
     """
-    Gestionnaire central de mémoire.
-
-    Chaque catégorie possède son propre fichier JSON.
+    Gestionnaire de mémoire persistante.
     """
 
     CATEGORIES = {
@@ -36,42 +46,135 @@ class MemoryStore:
         "knowledge",
     }
 
+    LONG_TERM_CATEGORIES = (
+        "personal",
+        "emotional",
+        "tasks",
+        "knowledge",
+    )
+
+    STOP_WORDS = {
+        "le",
+        "la",
+        "les",
+        "un",
+        "une",
+        "des",
+        "de",
+        "du",
+        "dans",
+        "sur",
+        "avec",
+        "pour",
+        "par",
+        "et",
+        "ou",
+        "est",
+        "sont",
+        "je",
+        "tu",
+        "il",
+        "elle",
+        "nous",
+        "vous",
+        "ils",
+        "elles",
+        "mon",
+        "ma",
+        "mes",
+        "ton",
+        "ta",
+        "tes",
+        "son",
+        "sa",
+        "ses",
+        "ce",
+        "cet",
+        "cette",
+        "ça",
+        "ca",
+        "qui",
+        "que",
+        "quoi",
+        "comment",
+    }
+
     def __init__(
         self,
         directory: Path = MEMORY_DIR,
     ):
-        self.directory = Path(directory)
-        self.directory.mkdir(parents=True, exist_ok=True)
+        self.directory = Path(
+            directory
+        )
+
+        self.directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
     # ========================================================
-    # UTILITAIRES
+    # STORAGE
     # ========================================================
 
-    def _path(self, category: str) -> Path:
-        self._validate_category(category)
+    def _path(
+        self,
+        category: str,
+    ) -> Path:
 
-        return self.directory / f"{category}.json"
+        self._validate_category(
+            category
+        )
 
-    def _validate_category(self, category: str) -> None:
+        return (
+            self.directory
+            / f"{category}.json"
+        )
+
+    def _validate_category(
+        self,
+        category: str,
+    ) -> None:
+
         if category not in self.CATEGORIES:
+
             raise ValueError(
-                f"Catégorie mémoire inconnue : {category}"
+                "Catégorie mémoire inconnue : "
+                f"{category}"
             )
 
-    def _load(self, category: str) -> list[dict[str, Any]]:
-        path = self._path(category)
+    def _load(
+        self,
+        category: str,
+    ) -> list[dict[str, Any]]:
+
+        path = self._path(
+            category
+        )
 
         if not path.exists():
             return []
 
         try:
-            with path.open("r", encoding="utf-8") as file:
-                data = json.load(file)
 
-        except (OSError, json.JSONDecodeError):
+            with path.open(
+                "r",
+                encoding="utf-8",
+            ) as file:
+
+                data = json.load(
+                    file
+                )
+
+        except (
+            OSError,
+            json.JSONDecodeError,
+        ):
             return []
 
-        if not isinstance(data, list):
+        if not isinstance(
+            data,
+            list,
+        ):
             return []
 
         return data
@@ -81,14 +184,22 @@ class MemoryStore:
         category: str,
         entries: list[dict[str, Any]],
     ) -> None:
-        path = self._path(category)
 
-        temporary_path = path.with_suffix(".tmp")
+        path = self._path(
+            category
+        )
+
+        temporary_path = (
+            path.with_suffix(
+                ".tmp"
+            )
+        )
 
         with temporary_path.open(
             "w",
             encoding="utf-8",
         ) as file:
+
             json.dump(
                 entries,
                 file,
@@ -96,44 +207,70 @@ class MemoryStore:
                 ensure_ascii=False,
             )
 
-        temporary_path.replace(path)
+        temporary_path.replace(
+            path
+        )
 
     # ========================================================
-    # AJOUT
+    # CREATE
     # ========================================================
 
     def add(
         self,
         category: str,
         content: str,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[str, Any]
+        | None = None,
     ) -> dict[str, Any]:
-        """
-        Ajoute une entrée mémoire.
-        """
 
-        if not content or not content.strip():
-            raise ValueError("Impossible d'enregistrer une mémoire vide.")
+        self._validate_category(
+            category
+        )
+
+        content = str(
+            content
+        ).strip()
+
+        if not content:
+
+            raise ValueError(
+                "Impossible d'enregistrer "
+                "une mémoire vide."
+            )
 
         entry = {
-            "id": str(uuid.uuid4()),
-            "content": content.strip(),
-            "metadata": metadata or {},
-            "created_at": datetime.now(
-                timezone.utc
-            ).isoformat(),
+            "id": str(
+                uuid.uuid4()
+            ),
+            "content": content,
+            "metadata": (
+                metadata
+                or {}
+            ),
+            "created_at": (
+                datetime.now(
+                    timezone.utc
+                ).isoformat()
+            ),
         }
 
-        entries = self._load(category)
+        entries = self._load(
+            category
+        )
 
-        entries.append(entry)
+        entries.append(
+            entry
+        )
 
-        self._save(category, entries)
+        self._save(
+            category,
+            entries,
+        )
 
         return entry
 
     # ========================================================
-    # LECTURE
+    # READ
     # ========================================================
 
     def get(
@@ -141,16 +278,17 @@ class MemoryStore:
         category: str,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
-        """
-        Retourne les dernières mémoires.
-        """
 
-        entries = self._load(category)
+        entries = self._load(
+            category
+        )
 
         if limit <= 0:
             return []
 
-        return entries[-limit:]
+        return entries[
+            -limit:
+        ]
 
     def search(
         self,
@@ -159,37 +297,64 @@ class MemoryStore:
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """
-        Recherche textuelle simple.
-
-        Une recherche vectorielle pourra remplacer ceci plus tard
-        sans modifier le reste de l'architecture.
+        Recherche textuelle avec score simple.
         """
 
-        query = query.lower().strip()
+        query_tokens = self._tokens(
+            query
+        )
 
-        if not query:
+        if not query_tokens:
             return []
 
-        entries = self._load(category)
+        entries = self._load(
+            category
+        )
 
-        results = []
+        scored = []
 
-        for entry in reversed(entries):
+        for entry in entries:
 
             content = str(
-                entry.get("content", "")
-            ).lower()
+                entry.get(
+                    "content",
+                    "",
+                )
+            )
 
-            if query in content:
-                results.append(entry)
+            content_tokens = (
+                self._tokens(
+                    content
+                )
+            )
 
-            if len(results) >= limit:
-                break
+            score = len(
+                query_tokens
+                & content_tokens
+            )
 
-        return results
+            if score > 0:
+
+                scored.append(
+                    (
+                        score,
+                        entry,
+                    )
+                )
+
+        scored.sort(
+            key=lambda item: item[0],
+            reverse=True,
+        )
+
+        return [
+            entry
+            for _score, entry
+            in scored[:limit]
+        ]
 
     # ========================================================
-    # SUPPRESSION
+    # DELETE
     # ========================================================
 
     def delete(
@@ -197,108 +362,154 @@ class MemoryStore:
         category: str,
         entry_id: str,
     ) -> bool:
-        """
-        Supprime une mémoire précise.
-        """
 
-        entries = self._load(category)
+        entries = self._load(
+            category
+        )
 
-        original_count = len(entries)
+        original_count = len(
+            entries
+        )
 
         entries = [
             entry
             for entry in entries
-            if entry.get("id") != entry_id
+            if entry.get("id")
+            != entry_id
         ]
 
-        if len(entries) == original_count:
+        if (
+            len(entries)
+            == original_count
+        ):
             return False
 
-        self._save(category, entries)
+        self._save(
+            category,
+            entries,
+        )
 
         return True
 
-    def clear(self, category: str) -> None:
-        """
-        Efface complètement une catégorie.
-        """
+    def clear(
+        self,
+        category: str,
+    ) -> None:
 
-        self._save(category, [])
+        self._save(
+            category,
+            [],
+        )
 
     # ========================================================
-    # CONTEXTE MANAGER
+    # MANAGER CONTEXT
     # ========================================================
 
     def build_manager_context(
         self,
-        conversation_limit: int = 12,
-        personal_limit: int = 20,
-        emotional_limit: int = 10,
-        task_limit: int = 10,
+        query: str = "",
+        personal_limit: int = 8,
+        emotional_limit: int = 4,
+        task_limit: int = 6,
+        knowledge_limit: int = 8,
     ) -> str:
         """
-        Construit le contexte mémoire injecté dans le prompt du Manager.
+        Construit UNIQUEMENT le contexte longue durée.
+
+        La catégorie conversation n'est volontairement
+        jamais injectée ici.
         """
 
         sections = []
 
-        personal = self.get(
-            "personal",
-            personal_limit,
+        categories = (
+            (
+                "personal",
+                personal_limit,
+                "MÉMOIRE PERSONNELLE",
+            ),
+            (
+                "emotional",
+                emotional_limit,
+                "CONTEXTE ÉMOTIONNEL",
+            ),
+            (
+                "tasks",
+                task_limit,
+                "TÂCHES / PROJETS",
+            ),
+            (
+                "knowledge",
+                knowledge_limit,
+                "CONNAISSANCES",
+            ),
         )
 
-        if personal:
-            sections.append(
-                "=== MÉMOIRE PERSONNELLE ===\n"
-                + "\n".join(
-                    f"- {entry['content']}"
-                    for entry in personal
+        for (
+            category,
+            limit,
+            title,
+        ) in categories:
+
+            if query.strip():
+
+                entries = self.search(
+                    category,
+                    query,
+                    limit,
                 )
+
+            else:
+
+                entries = self.get(
+                    category,
+                    limit,
+                )
+
+            if not entries:
+                continue
+
+            content = "\n".join(
+                f"- {entry['content']}"
+                for entry in entries
             )
 
-        emotional = self.get(
-            "emotional",
-            emotional_limit,
-        )
-
-        if emotional:
             sections.append(
-                "=== CONTEXTE ÉMOTIONNEL ===\n"
-                + "\n".join(
-                    f"- {entry['content']}"
-                    for entry in emotional
-                )
-            )
-
-        tasks = self.get(
-            "tasks",
-            task_limit,
-        )
-
-        if tasks:
-            sections.append(
-                "=== CONTEXTE DES TÂCHES ===\n"
-                + "\n".join(
-                    f"- {entry['content']}"
-                    for entry in tasks
-                )
-            )
-
-        conversation = self.get(
-            "conversation",
-            conversation_limit,
-        )
-
-        if conversation:
-            sections.append(
-                "=== CONVERSATION RÉCENTE ===\n"
-                + "\n".join(
-                    f"- {entry['content']}"
-                    for entry in conversation
-                )
+                f"=== {title} ===\n"
+                f"{content}"
             )
 
         if not sections:
-            return "(aucune mémoire pertinente)"
 
-        return "\n\n".join(sections)
+            return (
+                "(aucune mémoire longue durée "
+                "pertinente)"
+            )
+
+        return "\n\n".join(
+            sections
+        )
+
+    # ========================================================
+    # TOKENISATION
+    # ========================================================
+
+    def _tokens(
+        self,
+        text: str,
+    ) -> set[str]:
+
+        words = re.findall(
+            r"[a-zA-ZÀ-ÿ0-9_]+",
+            text.lower(),
+        )
+
+        return {
+            word
+            for word in words
+            if (
+                len(word) >= 3
+                and word
+                not in self.STOP_WORDS
+            )
+        }

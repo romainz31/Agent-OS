@@ -1,23 +1,41 @@
 """
-Manager principal Agent-OS V2.
+Manager principal Agent-OS V2.1.
 
-Le Manager est l'interlocuteur principal de l'utilisateur.
+Architecture :
 
-Responsabilités :
+Utilisateur
+    ↓
+Manager
+    ↓
+ManagerRouter
+    ↓
+conversation / tâche / mission
+    ↓
+WorkerEngine
+    ↓
+Workers
+    ↓
+EventBus
+    ↓
+Manager
 
-    - comprendre les demandes
-    - maintenir le contexte
-    - décider de l'action
-    - créer des tâches
-    - créer des missions
-    - déléguer aux workers
-    - suivre les résultats
-    - gérer les événements
+Principe V2.1 :
+
+Le LLM ne décide plus seul du routage.
+Python choisit l'action générale et le worker.
+
+La conversation courante reste en RAM.
+La mémoire longue durée est séparée.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import json
+
+from typing import (
+    Any,
+    Optional,
+)
 
 from v2.brain.llm import (
     LLM,
@@ -32,6 +50,15 @@ from v2.config import (
 from v2.events.event_bus import (
     Event,
     EventBus,
+)
+
+from v2.manager.decision import (
+    ManagerDecision,
+)
+
+from v2.manager.router import (
+    ManagerRouter,
+    RouteDecision,
 )
 
 from v2.memory.memory import (
@@ -60,67 +87,88 @@ from v2.workers.worker_engine import (
     WorkerEngine,
 )
 
-from v2.manager.decision import (
-    ManagerDecision,
-)
-
 
 class Manager:
     """
-    Manager principal d'Agent-OS.
-
-    Le Manager ne réalise pas directement le travail technique.
-
-    Il :
-
-        1. comprend la demande
-        2. décide quoi faire
-        3. crée une tâche ou une mission
-        4. choisit un worker
-        5. lance le travail
-        6. récupère les résultats
-        7. informe l'utilisateur
+    Manager principal Agent-OS.
     """
 
-    # ============================================================
-    # INITIALISATION
-    # ============================================================
+    SESSION_HISTORY_LIMIT = 12
 
     def __init__(
         self,
         llm: Optional[LLM] = None,
-        memory: Optional[MemoryStore] = None,
-        tasks: Optional[TaskManager] = None,
-        missions: Optional[MissionManager] = None,
-        permissions: Optional[PermissionEngine] = None,
-        event_bus: Optional[EventBus] = None,
-        worker_engine: Optional[WorkerEngine] = None,
-    ):
+        memory: Optional[
+            MemoryStore
+        ] = None,
+        tasks: Optional[
+            TaskManager
+        ] = None,
+        missions: Optional[
+            MissionManager
+        ] = None,
+        permissions: Optional[
+            PermissionEngine
+        ] = None,
+        event_bus: Optional[
+            EventBus
+        ] = None,
+        worker_engine: Optional[
+            WorkerEngine
+        ] = None,
+        router: Optional[
+            ManagerRouter
+        ] = None,
+    ) -> None:
+
         self.llm = llm or LLM(
             host=OLLAMA_HOST,
             model=OLLAMA_MODEL,
         )
 
-        self.memory = memory or MemoryStore()
-
-        self.tasks = tasks or TaskManager()
-
-        # MissionManager ne prend actuellement
-        # que storage_path en argument.
-        self.missions = missions or MissionManager()
-
-        self.permissions = permissions or PermissionEngine()
-
-        self.event_bus = event_bus or EventBus()
-
-        self.worker_engine = worker_engine or WorkerEngine(
-            task_manager=self.tasks,
-            event_bus=self.event_bus,
+        self.memory = (
+            memory
+            or MemoryStore()
         )
 
-        # ========================================================
-        # ÉVÉNEMENTS
-        # ========================================================
+        self.tasks = (
+            tasks
+            or TaskManager()
+        )
+
+        self.missions = (
+            missions
+            or MissionManager()
+        )
+
+        self.permissions = (
+            permissions
+            or PermissionEngine()
+        )
+
+        self.event_bus = (
+            event_bus
+            or EventBus()
+        )
+
+        self.worker_engine = (
+            worker_engine
+            or WorkerEngine(
+                task_manager=self.tasks,
+                event_bus=self.event_bus,
+            )
+        )
+
+        self.router = (
+            router
+            or ManagerRouter()
+        )
+
+        # Conversation de la session actuelle.
+        # Elle n'est PAS persistée.
+        self.session_messages: list[
+            dict[str, str]
+        ] = []
 
         self.event_bus.subscribe(
             "task.created",
@@ -142,17 +190,14 @@ class Manager:
             self._on_task_failed,
         )
 
-    # ============================================================
+    # ========================================================
     # WORKERS
-    # ============================================================
+    # ========================================================
 
     def register_worker(
         self,
         worker: Worker,
     ) -> None:
-        """
-        Enregistre un worker.
-        """
 
         self.worker_engine.register(
             worker
@@ -161,309 +206,221 @@ class Manager:
     def list_workers(
         self,
     ) -> list[dict[str, str]]:
-        """
-        Retourne la liste des workers disponibles.
-        """
 
-        workers = []
-
-        for name, worker in self.worker_engine.workers.items():
-
-            workers.append(
-                {
-                    "name": name,
-                    "description": getattr(
-                        worker,
-                        "description",
-                        "",
-                    ),
-                }
+        return [
+            {
+                "name": name,
+                "description": getattr(
+                    worker,
+                    "description",
+                    "",
+                ),
+            }
+            for (
+                name,
+                worker,
             )
-
-        return workers
+            in self.worker_engine.workers.items()
+        ]
 
     def get_worker_names(
         self,
     ) -> list[str]:
-        """
-        Retourne uniquement les noms des workers.
-        """
 
         return list(
             self.worker_engine.workers.keys()
         )
 
-    # ============================================================
+    # ========================================================
     # CHAT
-    # ============================================================
+    # ========================================================
 
     def chat(
         self,
         message: str,
     ) -> str:
-        """
-        Point d'entrée principal du Manager.
-        """
 
         message = message.strip()
 
         if not message:
-            return "Je n'ai reçu aucun message."
 
-        # --------------------------------------------------------
-        # MÉMOIRE DE CONVERSATION
-        # --------------------------------------------------------
+            return (
+                "Je n'ai reçu aucun message."
+            )
 
-        self.memory.add(
-            "conversation",
-            message,
-            metadata={
-                "role": "user",
-            },
+        route = self.router.route(
+            message=message,
+            available_workers=(
+                self.get_worker_names()
+            ),
         )
 
-        # --------------------------------------------------------
-        # CONTEXTE
-        # --------------------------------------------------------
+        long_term_context = (
+            self.memory.build_manager_context(
+                query=message
+            )
+        )
 
-        context = self.memory.build_manager_context()
-
-        # --------------------------------------------------------
-        # DÉCISION
-        # --------------------------------------------------------
+        session_context = (
+            self._build_session_context()
+        )
 
         try:
 
-            decision = self._decide(
-                message=message,
-                context=context,
-            )
+            if (
+                route.action
+                == "conversation"
+            ):
+
+                response = (
+                    self._conversation_reply(
+                        message=message,
+                        session_context=(
+                            session_context
+                        ),
+                        long_term_context=(
+                            long_term_context
+                        ),
+                    )
+                )
+
+            else:
+
+                decision = (
+                    self._build_work_decision(
+                        message=message,
+                        route=route,
+                        session_context=(
+                            session_context
+                        ),
+                        long_term_context=(
+                            long_term_context
+                        ),
+                    )
+                )
+
+                response = (
+                    self._execute_decision(
+                        decision=decision,
+                        original_message=(
+                            message
+                        ),
+                    )
+                )
 
         except LLMError as exc:
 
-            return (
-                "Je n'arrive pas à contacter le modèle local.\n"
+            response = (
+                "Je n'arrive pas à contacter "
+                "le modèle local.\n"
                 f"Détail : {exc}"
-            )
-
-        except Exception as exc:
-
-            return (
-                "Une erreur est survenue pendant "
-                "l'analyse de ta demande.\n"
-                f"Détail : {exc}"
-            )
-
-        # --------------------------------------------------------
-        # EXÉCUTION
-        # --------------------------------------------------------
-
-        try:
-
-            response = self._execute_decision(
-                decision=decision,
-                original_message=message,
             )
 
         except Exception as exc:
 
             response = (
-                "Je n'ai pas pu exécuter la décision.\n"
+                "Une erreur est survenue.\n"
                 f"Détail : {exc}"
             )
 
-        # --------------------------------------------------------
-        # MÉMOIRE
-        # --------------------------------------------------------
+        self._append_session(
+            role="user",
+            content=message,
+        )
 
-        self.memory.add(
-            "conversation",
-            response,
-            metadata={
-                "role": "manager",
-                "action": decision.action,
-            },
+        self._append_session(
+            role="manager",
+            content=response,
         )
 
         return response
 
-    # ============================================================
-    # DÉCISION
-    # ============================================================
+    # ========================================================
+    # CONVERSATION
+    # ========================================================
 
-    def _decide(
+    def _conversation_reply(
         self,
         message: str,
-        context: str,
-    ) -> ManagerDecision:
-        """
-        Demande au LLM de déterminer l'action à effectuer.
-        """
+        session_context: str,
+        long_term_context: str,
+    ) -> str:
 
-        prompt = self._build_decision_prompt(
-            message=message,
-            context=context,
-        )
+        prompt = f"""
+Tu es le Manager personnel de l'utilisateur.
 
-        raw = self.llm.simple_chat(
+Tu es son interlocuteur principal.
+
+Tu peux discuter naturellement et répondre
+directement aux questions qui ne nécessitent pas
+de travail délégué.
+
+============================================================
+CONVERSATION DE CETTE SESSION
+============================================================
+
+{session_context}
+
+============================================================
+MÉMOIRE LONGUE DURÉE PERTINENTE
+============================================================
+
+{long_term_context}
+
+============================================================
+MESSAGE ACTUEL
+============================================================
+
+{message}
+
+Réponds naturellement en français.
+
+Ne parle pas de workers, de routage ou
+d'architecture interne sauf si l'utilisateur
+pose explicitement une question à ce sujet.
+"""
+
+        return self.llm.simple_chat(
             prompt=prompt,
             system_prompt=(
-                "Tu es le Manager principal d'Agent-OS. "
-                "Tu dois analyser les demandes de l'utilisateur "
-                "et produire une décision JSON valide."
+                "Tu es le Manager personnel "
+                "d'Agent-OS."
             ),
         )
 
-        return self._parse_decision(
-            raw=raw,
-            original_message=message,
-        )
+    # ========================================================
+    # WORK DECISION
+    # ========================================================
 
-    # ============================================================
-    # PROMPT DÉCISION
-    # ============================================================
-
-    def _build_decision_prompt(
+    def _build_work_decision(
         self,
         message: str,
-        context: str,
-    ) -> str:
+        route: RouteDecision,
+        session_context: str,
+        long_term_context: str,
+    ) -> ManagerDecision:
         """
-        Construit le prompt utilisé pour décider de l'action.
+        Le routeur Python a déjà décidé l'action.
+
+        Le LLM ne fait ici que structurer
+        proprement la tâche ou mission.
         """
 
-        workers = self.list_workers()
+        prompt = f"""
+Tu travailles pour le Manager Agent-OS.
 
-        workers_text = "\n".join(
-            (
-                f"- {worker['name']} : "
-                f"{worker['description']}"
-            )
-            for worker in workers
-        )
+Python a déjà décidé le routage suivant :
 
-        return f"""
-Tu es le Manager principal d'un système d'agents IA.
+ACTION :
+{route.action}
 
-Tu es l'interlocuteur direct de l'utilisateur.
+WORKER :
+{route.worker or "non déterminé"}
 
-Tu dois décider ce qu'il faut faire.
+RAISON :
+{route.reason}
 
-============================================================
-WORKERS DISPONIBLES
-============================================================
-
-{workers_text}
-
-============================================================
-RÈGLES DE ROUTAGE
-============================================================
-
-researcher :
-    Recherche web, documentation, comparaison,
-    collecte d'informations, analyse de sources.
-
-developer :
-    Python, programmation, architecture logicielle,
-    création ou modification de code.
-
-tester :
-    Tests, vérification, validation, reproduction
-    de bugs et contrôle du fonctionnement.
-
-demo :
-    Tests simples du système.
-
-ai_worker :
-    Tâches générales qui ne correspondent pas clairement
-    à un worker spécialisé.
-
-IMPORTANT :
-Tu dois privilégier un worker spécialisé lorsqu'il correspond
-à la demande.
-
-N'utilise PAS ai_worker simplement parce que la demande
-est générale.
-
-============================================================
-ACTIONS POSSIBLES
-============================================================
-
-conversation
-create_task
-create_mission
-approval_required
-blocked
-
-============================================================
-QUAND UTILISER create_task
-============================================================
-
-Utilise create_task lorsqu'une seule tâche doit être exécutée.
-
-Exemples :
-
-    "Recherche comment fonctionne MQTT"
-    "Écris un script Python"
-    "Teste ce système"
-
-============================================================
-QUAND UTILISER create_mission
-============================================================
-
-Utilise create_mission lorsqu'une demande contient plusieurs
-étapes qui doivent être exécutées dans un ordre logique.
-
-Exemples :
-
-    "Recherche d'abord les solutions puis crée l'architecture
-     et enfin teste-la."
-
-    "Analyse le problème, développe une solution puis vérifie
-     qu'elle fonctionne."
-
-Une mission doit être décomposée en plusieurs étapes.
-
-============================================================
-CONVERSATION
-============================================================
-
-Utilise conversation lorsqu'aucun travail externe
-n'est nécessaire.
-
-Exemples :
-
-    "Bonjour"
-    "Explique-moi ce qu'est un agent IA"
-    "Tu penses quoi de cette architecture ?"
-
-============================================================
-APPROBATION
-============================================================
-
-Utilise approval_required lorsqu'une action nécessite
-l'autorisation explicite de l'utilisateur.
-
-============================================================
-BLOCAGE
-============================================================
-
-Utilise blocked lorsqu'une action ne doit pas être exécutée.
-
-============================================================
-PRIORITÉS
-============================================================
-
-low
-normal
-high
-critical
-
-============================================================
-CONTEXTE MÉMOIRE
-============================================================
-
-{context}
+Tu n'as PAS le droit de changer cette action.
 
 ============================================================
 MESSAGE UTILISATEUR
@@ -472,495 +429,234 @@ MESSAGE UTILISATEUR
 {message}
 
 ============================================================
-FORMAT DE RÉPONSE
+SESSION ACTUELLE
 ============================================================
 
-Réponds UNIQUEMENT avec un objet JSON.
+{session_context}
 
-Pour conversation :
+============================================================
+MÉMOIRE PERTINENTE
+============================================================
+
+{long_term_context}
+
+============================================================
+FORMAT
+============================================================
+
+Si ACTION = create_task :
 
 {{
-    "action": "conversation",
-    "response": "réponse à l'utilisateur"
-}}
-
-Pour une tâche :
-
-{{
-    "action": "create_task",
-    "response": "courte explication",
-    "title": "titre",
-    "description": "description complète",
+    "response": "courte confirmation naturelle",
+    "title": "titre clair",
+    "description": "description complète de la tâche",
     "priority": "normal",
-    "assigned_agent": "researcher"
+    "deadline": null
 }}
 
-Pour une mission :
+Si ACTION = create_mission :
 
 {{
-    "action": "create_mission",
-    "response": "courte explication",
-    "title": "titre",
-    "objective": "objectif complet",
-    "description": "description de la mission",
-    "priority": "normal"
+    "response": "courte confirmation naturelle",
+    "title": "titre clair",
+    "objective": "objectif global",
+    "description": "description précise de la première étape",
+    "priority": "normal",
+    "deadline": null
 }}
 
-Pour une approbation :
-
-{{
-    "action": "approval_required",
-    "response": "explication",
-    "required_approval": "action nécessitant une autorisation"
-}}
-
-Pour un blocage :
-
-{{
-    "action": "blocked",
-    "response": "explication"
-}}
+Réponds UNIQUEMENT avec le JSON.
 """
 
-    # ============================================================
-    # PARSING DÉCISION
-    # ============================================================
-
-    def _parse_decision(
-        self,
-        raw: str,
-        original_message: str,
-    ) -> ManagerDecision:
-        """
-        Convertit la réponse du LLM en ManagerDecision.
-        """
-
-        import json
-
-        text = raw.strip()
-
-        try:
-
-            data = json.loads(text)
-
-        except json.JSONDecodeError:
-
-            start = text.find("{")
-            end = text.rfind("}")
-
-            if start != -1 and end != -1 and end > start:
-
-                try:
-
-                    data = json.loads(
-                        text[start:end + 1]
-                    )
-
-                except json.JSONDecodeError:
-
-                    data = {}
-
-            else:
-
-                data = {}
-
-        # --------------------------------------------------------
-        # RÉPARATION DES ALIAS
-        # --------------------------------------------------------
-
-        action = str(
-            data.get(
-                "action",
-                "",
-            )
-        ).strip().lower()
-
-        aliases = {
-            "response": "conversation",
-            "answer": "conversation",
-            "chat": "conversation",
-            "analysis": "conversation",
-            "respond": "conversation",
-            "task": "create_task",
-            "mission": "create_mission",
-            "approval": "approval_required",
-            "approve": "approval_required",
-            "deny": "blocked",
-            "block": "blocked",
-        }
-
-        action = aliases.get(
-            action,
-            action,
+        raw = self.llm.simple_chat(
+            prompt=prompt,
+            system_prompt=(
+                "Tu structures des tâches "
+                "pour Agent-OS. "
+                "Tu réponds uniquement en JSON."
+            ),
         )
 
-        # --------------------------------------------------------
-        # DÉTECTION DE MISSION
-        # --------------------------------------------------------
-
-        lower_message = original_message.lower()
-
-        mission_indicators = [
-            "d'abord",
-            "ensuite",
-            "puis",
-            "enfin",
-            "après",
-            "après ça",
-            "et ensuite",
-            "première étape",
-            "deuxième étape",
-            "troisième étape",
-            "plusieurs étapes",
-            "étapes",
-            "puis teste",
-            "puis vérifie",
-            "ensuite teste",
-            "ensuite vérifie",
-            "recherche puis",
-            "analyse puis",
-            "développe puis",
-        ]
-
-        if (
-            action in {
-                "",
-                "conversation",
-                "create_task",
-            }
-            and any(
-                indicator in lower_message
-                for indicator in mission_indicators
-            )
-        ):
-            action = "create_mission"
-
-        # --------------------------------------------------------
-        # ACTION INVALIDE
-        # --------------------------------------------------------
-
-        if action not in {
-            "conversation",
-            "create_task",
-            "create_mission",
-            "approval_required",
-            "blocked",
-        }:
-
-            action = "conversation"
-
-            data = {
-                "action": "conversation",
-                "response": raw,
-            }
-
-        # --------------------------------------------------------
-        # WORKER
-        # --------------------------------------------------------
-
-        assigned_agent = data.get(
-            "assigned_agent"
+        data = self._parse_json(
+            raw
         )
 
-        if isinstance(
-            assigned_agent,
-            str,
-        ):
+        if route.action == "create_task":
 
-            assigned_agent = assigned_agent.strip()
-
-        else:
-
-            assigned_agent = None
-
-        available_workers = set(
-            self.get_worker_names()
-        )
-
-        if (
-            assigned_agent
-            and assigned_agent not in available_workers
-        ):
-            assigned_agent = None
-
-        # --------------------------------------------------------
-        # ROUTAGE DÉTERMINISTE
-        # --------------------------------------------------------
-
-        if action == "create_task":
-
-            inferred_worker = self._infer_worker(
-                original_message
-            )
-
-            if inferred_worker:
-                assigned_agent = inferred_worker
-
-        # --------------------------------------------------------
-        # DÉCISION
-        # --------------------------------------------------------
-
-        data["action"] = action
-
-        if assigned_agent:
-            data["assigned_agent"] = assigned_agent
-
-        try:
-
-            decision = ManagerDecision.from_dict(
-                data
-            )
-
-        except Exception:
-
-            decision = ManagerDecision(
-                action="conversation",
-                response=(
+            return ManagerDecision(
+                action="create_task",
+                response=str(
                     data.get(
-                        "response"
+                        "response",
+                        "",
                     )
-                    or raw
+                ).strip(),
+                title=(
+                    str(
+                        data.get(
+                            "title",
+                            "",
+                        )
+                    ).strip()
+                    or self._fallback_title(
+                        message
+                    )
                 ),
+                description=(
+                    str(
+                        data.get(
+                            "description",
+                            "",
+                        )
+                    ).strip()
+                    or message
+                ),
+                priority=self._safe_priority(
+                    data.get(
+                        "priority"
+                    )
+                ),
+                deadline=(
+                    data.get(
+                        "deadline"
+                    )
+                    or None
+                ),
+                assigned_agent=(
+                    route.worker
+                    or self._fallback_worker()
+                ),
+                metadata={
+                    "router_reason": (
+                        route.reason
+                    ),
+                    "original_message": (
+                        message
+                    ),
+                },
             )
 
-        return decision
-
-    # ============================================================
-    # ROUTAGE WORKER
-    # ============================================================
-
-    def _infer_worker(
-        self,
-        text: str,
-    ) -> Optional[str]:
-        """
-        Détermine automatiquement le worker adapté.
-        """
-
-        lower = text.lower()
-
-        available = set(
-            self.get_worker_names()
+        return ManagerDecision(
+            action="create_mission",
+            response=str(
+                data.get(
+                    "response",
+                    "",
+                )
+            ).strip(),
+            title=(
+                str(
+                    data.get(
+                        "title",
+                        "",
+                    )
+                ).strip()
+                or self._fallback_title(
+                    message
+                )
+            ),
+            objective=(
+                str(
+                    data.get(
+                        "objective",
+                        "",
+                    )
+                ).strip()
+                or message
+            ),
+            description=(
+                str(
+                    data.get(
+                        "description",
+                        "",
+                    )
+                ).strip()
+                or message
+            ),
+            priority=self._safe_priority(
+                data.get(
+                    "priority"
+                )
+            ),
+            deadline=(
+                data.get(
+                    "deadline"
+                )
+                or None
+            ),
+            assigned_agent=(
+                route.worker
+            ),
+            metadata={
+                "router_reason": (
+                    route.reason
+                ),
+                "original_message": (
+                    message
+                ),
+            },
         )
 
-        # --------------------------------------------------------
-        # TESTEUR
-        # --------------------------------------------------------
-
-        tester_keywords = [
-            "teste",
-            "tester",
-            "test",
-            "tests",
-            "tester le",
-            "tester la",
-            "vérifie",
-            "vérifier",
-            "validation",
-            "valider",
-            "bug",
-            "bugs",
-            "erreur",
-            "erreurs",
-            "fonctionne",
-            "fonctionnement",
-            "reproduire",
-            "reproduis",
-        ]
-
-        if (
-            "tester" in available
-            and any(
-                keyword in lower
-                for keyword in tester_keywords
-            )
-        ):
-            return "tester"
-
-        # --------------------------------------------------------
-        # DEVELOPER
-        # --------------------------------------------------------
-
-        developer_keywords = [
-            "python",
-            "code",
-            "coder",
-            "développe",
-            "développer",
-            "développement",
-            "programme",
-            "programmer",
-            "programmation",
-            "script",
-            "classe",
-            "fonction",
-            "api",
-            "architecture logicielle",
-            "architecture python",
-            "module",
-            "refactor",
-            "refactoriser",
-            "implémente",
-            "implémenter",
-            "créé le fichier",
-            "crée le fichier",
-            "modifier le code",
-            "modifie le code",
-        ]
-
-        if (
-            "developer" in available
-            and any(
-                keyword in lower
-                for keyword in developer_keywords
-            )
-        ):
-            return "developer"
-
-        # --------------------------------------------------------
-        # RESEARCHER
-        # --------------------------------------------------------
-
-        researcher_keywords = [
-            "recherche",
-            "rechercher",
-            "cherche",
-            "chercher",
-            "documentation",
-            "documente",
-            "documenter",
-            "web",
-            "internet",
-            "source",
-            "sources",
-            "compare",
-            "comparer",
-            "comparaison",
-            "informations",
-            "information",
-            "étude",
-            "étudier",
-            "analyse documentaire",
-        ]
-
-        if (
-            "researcher" in available
-            and any(
-                keyword in lower
-                for keyword in researcher_keywords
-            )
-        ):
-            return "researcher"
-
-        # --------------------------------------------------------
-        # DEMO
-        # --------------------------------------------------------
-
-        if "demo" in available:
-
-            if any(
-                keyword in lower
-                for keyword in [
-                    "démo",
-                    "demo",
-                    "démonstration",
-                    "démontrer",
-                ]
-            ):
-                return "demo"
-
-        # --------------------------------------------------------
-        # AI WORKER
-        # --------------------------------------------------------
-
-        if "ai_worker" in available:
-            return "ai_worker"
-
-        return None
-
-    # ============================================================
-    # EXÉCUTION DÉCISION
-    # ============================================================
+    # ========================================================
+    # EXECUTE
+    # ========================================================
 
     def _execute_decision(
         self,
         decision: ManagerDecision,
         original_message: str,
     ) -> str:
-        """
-        Exécute la décision du Manager.
-        """
 
-        if decision.action == "conversation":
+        decision.validate()
 
-            return decision.response
-
-        if decision.action == "create_task":
+        if (
+            decision.action
+            == "create_task"
+        ):
 
             return self._execute_create_task(
                 decision=decision,
-                original_message=original_message,
+                original_message=(
+                    original_message
+                ),
             )
 
-        if decision.action == "create_mission":
+        if (
+            decision.action
+            == "create_mission"
+        ):
 
             return self._execute_create_mission(
                 decision=decision,
-                original_message=original_message,
-            )
-
-        if decision.action == "approval_required":
-
-            return (
-                decision.response
-                or (
-                    "Cette action nécessite "
-                    "ton approbation."
-                )
-            )
-
-        if decision.action == "blocked":
-
-            return (
-                decision.response
-                or (
-                    "Cette action est bloquée "
-                    "par les règles de sécurité."
-                )
+                original_message=(
+                    original_message
+                ),
             )
 
         return (
-            "Je n'ai pas pu déterminer quoi faire."
+            decision.response
+            or "Décision non exécutable."
         )
 
-    # ============================================================
-    # CRÉATION TÂCHE
-    # ============================================================
+    # ========================================================
+    # TASK
+    # ========================================================
 
     def _execute_create_task(
         self,
         decision: ManagerDecision,
         original_message: str,
     ) -> str:
-        """
-        Crée puis lance une tâche.
-        """
 
         assigned_agent = (
             decision.assigned_agent
+            or self._fallback_worker()
         )
 
         if not assigned_agent:
 
-            assigned_agent = self._infer_worker(
-                original_message
-            )
-
-        if not assigned_agent:
-
             return (
-                "Je n'ai trouvé aucun worker adapté "
-                "à cette tâche."
+                "Aucun worker n'est disponible."
             )
 
         if (
@@ -974,12 +670,28 @@ Pour un blocage :
             )
 
         task = self.tasks.create(
-            title=decision.title,
-            description=decision.description,
-            priority=decision.priority,
-            deadline=decision.deadline,
-            assigned_agent=assigned_agent,
-            metadata=decision.metadata,
+            title=(
+                decision.title
+                or self._fallback_title(
+                    original_message
+                )
+            ),
+            description=(
+                decision.description
+                or original_message
+            ),
+            priority=(
+                decision.priority
+            ),
+            deadline=(
+                decision.deadline
+            ),
+            assigned_agent=(
+                assigned_agent
+            ),
+            metadata=(
+                decision.metadata
+            ),
         )
 
         self.event_bus.publish(
@@ -987,103 +699,131 @@ Pour un blocage :
             {
                 "task_id": task.id,
                 "title": task.title,
-                "assigned_agent": assigned_agent,
+                "assigned_agent": (
+                    assigned_agent
+                ),
             },
         )
 
-        submitted = self.worker_engine.submit(
-            task.id
+        submitted = (
+            self.worker_engine.submit(
+                task.id
+            )
         )
 
         if not submitted:
 
             return (
-                f"Tâche créée ({task.id}), "
-                "mais je n'ai pas réussi à la lancer."
+                f"Tâche {task.id} créée, "
+                "mais son lancement a échoué."
             )
 
         return (
             decision.response
             or (
-                f"Tâche créée et confiée à "
+                "C'est lancé. "
+                f"Je l'ai confié à "
                 f"{assigned_agent}."
             )
         )
 
-    # ============================================================
-    # CRÉATION MISSION
-    # ============================================================
+    # ========================================================
+    # MISSION
+    # ========================================================
 
     def _execute_create_mission(
         self,
         decision: ManagerDecision,
         original_message: str,
     ) -> str:
-        """
-        Crée une mission et lance sa première étape.
-        """
 
         mission = self.missions.create(
-            title=decision.title,
+            title=(
+                decision.title
+                or self._fallback_title(
+                    original_message
+                )
+            ),
             objective=(
                 decision.objective
-                or decision.description
+                or original_message
             ),
-            priority=decision.priority,
-            deadline=decision.deadline,
-            metadata=decision.metadata,
+            priority=(
+                decision.priority
+            ),
+            deadline=(
+                decision.deadline
+            ),
+            metadata=(
+                decision.metadata
+            ),
         )
 
-        # --------------------------------------------------------
-        # PREMIER WORKER
-        # --------------------------------------------------------
-
-        assigned_agent = decision.assigned_agent
-
-        available = set(
-            self.get_worker_names()
+        assigned_agent = (
+            decision.assigned_agent
         )
 
         if (
             not assigned_agent
-            or assigned_agent not in available
+            or assigned_agent
+            not in self.get_worker_names()
         ):
-            assigned_agent = self._infer_first_mission_worker(
-                original_message
+
+            first_route = (
+                self.router.route(
+                    message=(
+                        decision.description
+                        or original_message
+                    ),
+                    available_workers=(
+                        self.get_worker_names()
+                    ),
+                )
+            )
+
+            assigned_agent = (
+                first_route.worker
+                or self._fallback_worker()
             )
 
         if not assigned_agent:
 
-            assigned_agent = self._infer_worker(
-                decision.objective
-                or decision.description
-                or original_message
+            self.missions.fail(
+                mission.id,
+                "Aucun worker disponible.",
             )
-
-        if not assigned_agent:
 
             return (
-                f"Mission créée ({mission.id}), "
-                "mais aucun worker n'a pu être sélectionné."
+                f"Mission {mission.id} créée, "
+                "mais aucun worker n'est disponible."
             )
 
-        # --------------------------------------------------------
-        # PREMIÈRE TÂCHE
-        # --------------------------------------------------------
-
         task = self.tasks.create(
-            title=decision.title,
-            description=(
-                decision.objective
-                or decision.description
+            title=(
+                decision.title
+                or "Première étape"
             ),
-            priority=decision.priority,
-            deadline=decision.deadline,
-            assigned_agent=assigned_agent,
-            parent_task_id=None,
+            description=(
+                decision.description
+                or original_message
+            ),
+            priority=(
+                decision.priority
+            ),
+            deadline=(
+                decision.deadline
+            ),
+            assigned_agent=(
+                assigned_agent
+            ),
             metadata={
-                "mission_id": mission.id,
+                "mission_id": (
+                    mission.id
+                ),
                 "mission_step": 1,
+                "mission_objective": (
+                    mission.objective
+                ),
             },
         )
 
@@ -1096,14 +836,20 @@ Pour un blocage :
             "task.created",
             {
                 "task_id": task.id,
+                "mission_id": (
+                    mission.id
+                ),
                 "title": task.title,
-                "assigned_agent": assigned_agent,
-                "mission_id": mission.id,
+                "assigned_agent": (
+                    assigned_agent
+                ),
             },
         )
 
-        submitted = self.worker_engine.submit(
-            task.id
+        submitted = (
+            self.worker_engine.submit(
+                task.id
+            )
         )
 
         if not submitted:
@@ -1112,104 +858,47 @@ Pour un blocage :
                 mission.id,
                 (
                     "Impossible de lancer "
-                    "la première tâche."
+                    "la première étape."
                 ),
             )
 
             return (
                 f"Mission {mission.id} créée, "
-                "mais la première tâche n'a pas pu démarrer."
+                "mais elle n'a pas pu démarrer."
             )
 
         return (
             decision.response
             or (
-                f"Mission {mission.id} créée. "
-                f"Première étape confiée à "
+                "Mission lancée. "
+                "Je commence par "
                 f"{assigned_agent}."
             )
         )
 
-    # ============================================================
-    # ROUTAGE PREMIÈRE ÉTAPE D'UNE MISSION
-    # ============================================================
-
-    def _infer_first_mission_worker(
-        self,
-        text: str,
-    ) -> Optional[str]:
-        """
-        Détermine le worker correspondant à la première
-        étape d'une mission.
-        """
-
-        lower = text.lower()
-
-        separators = [
-            " ensuite ",
-            " puis ",
-            " enfin ",
-            ", puis ",
-            ", ensuite ",
-            " après ",
-            " après ça ",
-        ]
-
-        first_part = lower
-
-        for separator in separators:
-
-            if separator in lower:
-
-                first_part = lower.split(
-                    separator,
-                    1,
-                )[0]
-
-        return self._infer_worker(
-            first_part
-        )
-
-    # ============================================================
-    # ÉVÉNEMENTS
-    # ============================================================
+    # ========================================================
+    # EVENTS
+    # ========================================================
 
     def _on_task_created(
         self,
         event: Event,
     ) -> None:
-        """
-        Réagit à la création d'une tâche.
-        """
 
-        # L'EventBus transmet un objet Event.
-        # Pour l'instant aucun traitement lourd.
         pass
 
     def _on_task_started(
         self,
         event: Event,
     ) -> None:
-        """
-        Réagit au démarrage d'une tâche.
-        """
 
-        # L'EventBus transmet un objet Event.
         pass
 
     def _on_task_completed(
         self,
         event: Event,
     ) -> None:
-        """
-        Réagit à la fin d'une tâche.
 
-        Si la tâche appartient à une mission,
-        on tente de lancer l'étape suivante.
-        """
-
-        # IMPORTANT :
-        # EventBus transmet Event, pas dict.
         data = event.data
 
         task_id = data.get(
@@ -1226,8 +915,40 @@ Pour un blocage :
         if task is None:
             return
 
-        mission_id = task.metadata.get(
-            "mission_id"
+        # Mémoire de travail persistante.
+        if task.result:
+
+            try:
+
+                self.memory.add(
+                    "tasks",
+                    (
+                        f"Tâche terminée : "
+                        f"{task.title}\n"
+                        f"Résultat : "
+                        f"{task.result}"
+                    ),
+                    metadata={
+                        "task_id": (
+                            task.id
+                        ),
+                        "status": (
+                            "completed"
+                        ),
+                        "worker": (
+                            task.assigned_agent
+                        ),
+                    },
+                )
+
+            except Exception:
+
+                pass
+
+        mission_id = (
+            task.metadata.get(
+                "mission_id"
+            )
         )
 
         if not mission_id:
@@ -1242,12 +963,7 @@ Pour un blocage :
         self,
         event: Event,
     ) -> None:
-        """
-        Réagit à l'échec d'une tâche.
-        """
 
-        # IMPORTANT :
-        # EventBus transmet Event, pas dict.
         data = event.data
 
         task_id = data.get(
@@ -1264,35 +980,36 @@ Pour un blocage :
         if task is None:
             return
 
-        mission_id = task.metadata.get(
-            "mission_id"
+        mission_id = (
+            task.metadata.get(
+                "mission_id"
+            )
         )
 
         if not mission_id:
             return
 
-        error = data.get(
-            "error"
-        ) or task.error
-
         self.missions.fail(
             mission_id,
-            error or "Une étape de la mission a échoué.",
+            (
+                data.get("error")
+                or task.error
+                or (
+                    "Une étape de la "
+                    "mission a échoué."
+                )
+            ),
         )
 
-    # ============================================================
-    # CONTINUER UNE MISSION
-    # ============================================================
+    # ========================================================
+    # MISSION CONTINUATION
+    # ========================================================
 
     def _continue_mission(
         self,
         mission_id: str,
         completed_task,
     ) -> None:
-        """
-        Demande au LLM quelle doit être la prochaine étape
-        d'une mission.
-        """
 
         mission = self.missions.get(
             mission_id
@@ -1300,10 +1017,6 @@ Pour un blocage :
 
         if mission is None:
             return
-
-        # --------------------------------------------------------
-        # RÉCUPÉRATION DES TÂCHES
-        # --------------------------------------------------------
 
         mission_tasks = []
 
@@ -1313,72 +1026,71 @@ Pour un blocage :
                 task_id
             )
 
-            if task is not None:
-
+            if task:
                 mission_tasks.append(
                     task
                 )
-
-        # --------------------------------------------------------
-        # CONSTRUCTION DU CONTEXTE
-        # --------------------------------------------------------
 
         previous_result = (
             completed_task.result
             or "Aucun résultat."
         )
 
-        prompt = f"""
-Une mission Agent-OS est en cours.
+        history = "\n".join(
+            (
+                f"- Étape "
+                f"{task.metadata.get('mission_step', '?')} : "
+                f"{task.title} "
+                f"[{task.status}]"
+            )
+            for task in mission_tasks
+        )
 
+        workers = ", ".join(
+            self.get_worker_names()
+        )
+
+        prompt = f"""
 MISSION :
 {mission.title}
 
 OBJECTIF :
 {mission.objective}
 
-ÉTAT :
-{mission.status}
+WORKERS DISPONIBLES :
+{workers}
 
-DERNIÈRE ÉTAPE TERMINÉE :
+DERNIÈRE ÉTAPE :
 {completed_task.title}
 
 RÉSULTAT :
 {previous_result}
 
-TÂCHES DÉJÀ RÉALISÉES :
+HISTORIQUE :
+{history}
 
-"""
+Décide si la mission est terminée.
 
-        for task in mission_tasks:
+Si elle est terminée :
 
-            prompt += (
-                f"- {task.title} : "
-                f"{task.status}\n"
-            )
-
-        prompt += """
-
-Décide maintenant s'il reste une étape.
-
-Si la mission est terminée :
-
-{
+{{
     "next": "complete",
-    "result": "résultat final"
-}
+    "result": "résultat final synthétique"
+}}
 
-S'il faut une nouvelle étape :
+Sinon :
 
-{
+{{
     "next": "task",
-    "title": "titre",
-    "description": "description précise",
-    "assigned_agent": "researcher|developer|tester|ai_worker",
+    "title": "titre de l'étape",
+    "description": "travail précis à effectuer",
     "priority": "normal"
-}
+}}
 
-Réponds uniquement avec du JSON.
+Ne choisis PAS le worker.
+Python le fera.
+
+Réponds uniquement en JSON.
 """
 
         try:
@@ -1386,9 +1098,13 @@ Réponds uniquement avec du JSON.
             raw = self.llm.simple_chat(
                 prompt=prompt,
                 system_prompt=(
-                    "Tu es le planificateur de missions "
-                    "d'Agent-OS. Réponds uniquement en JSON."
+                    "Tu planifies la suite "
+                    "d'une mission Agent-OS."
                 ),
+            )
+
+            decision = self._parse_json(
+                raw
             )
 
         except Exception as exc:
@@ -1400,123 +1116,126 @@ Réponds uniquement avec du JSON.
 
             return
 
-        decision = self._parse_mission_decision(
-            raw
+        next_action = decision.get(
+            "next"
         )
 
-        if decision is None:
-
-            self.missions.fail(
-                mission_id,
-                "Décision de mission invalide.",
-            )
-
-            return
-
-        # --------------------------------------------------------
-        # MISSION TERMINÉE
-        # --------------------------------------------------------
-
-        if decision.get(
-            "next"
-        ) == "complete":
-
-            result = decision.get(
-                "result"
-            )
+        if next_action == "complete":
 
             self.missions.complete(
                 mission_id,
-                result=result,
+                result=str(
+                    decision.get(
+                        "result",
+                        previous_result,
+                    )
+                ),
             )
 
             return
 
-        # --------------------------------------------------------
-        # NOUVELLE TÂCHE
-        # --------------------------------------------------------
-
-        if decision.get(
-            "next"
-        ) != "task":
+        if next_action != "task":
 
             self.missions.fail(
                 mission_id,
-                "Action de mission inconnue.",
+                (
+                    "Décision de mission "
+                    "invalide."
+                ),
             )
 
             return
 
-        title = decision.get(
-            "title"
-        )
+        title = str(
+            decision.get(
+                "title",
+                "",
+            )
+        ).strip()
 
-        description = decision.get(
-            "description"
-        )
+        description = str(
+            decision.get(
+                "description",
+                "",
+            )
+        ).strip()
 
-        assigned_agent = decision.get(
-            "assigned_agent"
-        )
-
-        priority = decision.get(
-            "priority",
-            mission.priority,
-        )
-
-        if not title or not description:
+        if (
+            not title
+            or not description
+        ):
 
             self.missions.fail(
                 mission_id,
-                "Étape de mission incomplète.",
+                (
+                    "Étape suivante "
+                    "incomplète."
+                ),
             )
 
             return
 
-        # --------------------------------------------------------
-        # ROUTAGE
-        # --------------------------------------------------------
-
-        available = set(
-            self.get_worker_names()
+        route = self.router.route(
+            message=description,
+            available_workers=(
+                self.get_worker_names()
+            ),
         )
 
-        if assigned_agent not in available:
-
-            assigned_agent = self._infer_worker(
-                f"{title}\n{description}"
-            )
+        assigned_agent = (
+            route.worker
+            or self._fallback_worker()
+        )
 
         if not assigned_agent:
 
             self.missions.fail(
                 mission_id,
-                "Aucun worker adapté à l'étape suivante.",
+                (
+                    "Aucun worker disponible "
+                    "pour l'étape suivante."
+                ),
             )
 
             return
 
-        # --------------------------------------------------------
-        # NUMÉRO D'ÉTAPE
-        # --------------------------------------------------------
-
         step_number = (
-            len(mission.task_ids)
+            len(
+                mission.task_ids
+            )
             + 1
         )
 
         task = self.tasks.create(
             title=title,
             description=description,
-            priority=priority,
-            deadline=mission.deadline,
-            assigned_agent=assigned_agent,
-            parent_task_id=completed_task.id,
+            priority=self._safe_priority(
+                decision.get(
+                    "priority"
+                )
+            ),
+            deadline=(
+                mission.deadline
+            ),
+            assigned_agent=(
+                assigned_agent
+            ),
+            parent_task_id=(
+                completed_task.id
+            ),
             metadata={
-                "mission_id": mission_id,
-                "mission_step": step_number,
-                "previous_task_id": completed_task.id,
-                "previous_result": previous_result,
+                "mission_id": (
+                    mission_id
+                ),
+                "mission_step": (
+                    step_number
+                ),
+                "previous_task_id": (
+                    completed_task.id
+                ),
+                "previous_result": (
+                    previous_result
+                ),
             },
         )
 
@@ -1529,29 +1248,110 @@ Réponds uniquement avec du JSON.
             "task.created",
             {
                 "task_id": task.id,
+                "mission_id": (
+                    mission_id
+                ),
                 "title": task.title,
-                "assigned_agent": assigned_agent,
-                "mission_id": mission_id,
+                "assigned_agent": (
+                    assigned_agent
+                ),
             },
         )
 
-        self.worker_engine.submit(
-            task.id
+        submitted = (
+            self.worker_engine.submit(
+                task.id
+            )
         )
 
-    # ============================================================
-    # PARSING MISSION
-    # ============================================================
+        if not submitted:
 
-    def _parse_mission_decision(
+            self.missions.fail(
+                mission_id,
+                (
+                    "Impossible de lancer "
+                    "l'étape suivante."
+                ),
+            )
+
+    # ========================================================
+    # SESSION
+    # ========================================================
+
+    def _append_session(
         self,
-        raw: str,
-    ) -> Optional[dict[str, Any]]:
-        """
-        Parse une décision de mission.
-        """
+        role: str,
+        content: str,
+    ) -> None:
 
-        import json
+        self.session_messages.append(
+            {
+                "role": role,
+                "content": content,
+            }
+        )
+
+        max_messages = (
+            self.SESSION_HISTORY_LIMIT
+            * 2
+        )
+
+        if (
+            len(self.session_messages)
+            > max_messages
+        ):
+
+            self.session_messages = (
+                self.session_messages[
+                    -max_messages:
+                ]
+            )
+
+    def _build_session_context(
+        self,
+    ) -> str:
+
+        if not self.session_messages:
+
+            return (
+                "(début d'une nouvelle session)"
+            )
+
+        lines = []
+
+        for message in (
+            self.session_messages[
+                -self.SESSION_HISTORY_LIMIT:
+            ]
+        ):
+
+            role = message.get(
+                "role",
+                "unknown",
+            )
+
+            content = message.get(
+                "content",
+                "",
+            )
+
+            lines.append(
+                f"{role.upper()} : "
+                f"{content}"
+            )
+
+        return "\n".join(
+            lines
+        )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    @staticmethod
+    def _parse_json(
+        raw: str,
+    ) -> dict[str, Any]:
 
         text = raw.strip()
 
@@ -1563,167 +1363,212 @@ Réponds uniquement avec du JSON.
 
         except json.JSONDecodeError:
 
-            start = text.find("{")
-            end = text.rfind("}")
+            start = text.find(
+                "{"
+            )
+
+            end = text.rfind(
+                "}"
+            )
 
             if (
                 start == -1
                 or end == -1
                 or end <= start
             ):
-                return None
+
+                return {}
 
             try:
 
                 data = json.loads(
-                    text[start:end + 1]
+                    text[
+                        start:end + 1
+                    ]
                 )
 
             except json.JSONDecodeError:
 
-                return None
+                return {}
 
         if not isinstance(
             data,
             dict,
         ):
-            return None
+
+            return {}
 
         return data
 
-    # ============================================================
+    @staticmethod
+    def _safe_priority(
+        value: Any,
+    ) -> str:
+
+        priority = str(
+            value
+            or "normal"
+        ).lower().strip()
+
+        if priority not in {
+            "low",
+            "normal",
+            "high",
+            "critical",
+        }:
+
+            return "normal"
+
+        return priority
+
+    @staticmethod
+    def _fallback_title(
+        message: str,
+    ) -> str:
+
+        title = " ".join(
+            message.split()
+        )
+
+        if len(title) > 80:
+
+            title = (
+                title[:77]
+                + "..."
+            )
+
+        return title
+
+    def _fallback_worker(
+        self,
+    ) -> Optional[str]:
+
+        available = (
+            self.get_worker_names()
+        )
+
+        if "ai_worker" in available:
+            return "ai_worker"
+
+        if available:
+            return available[0]
+
+        return None
+
+    # ========================================================
     # STATUS
-    # ============================================================
+    # ========================================================
 
     def status(
         self,
     ) -> dict[str, Any]:
-        """
-        Retourne l'état global du système.
-        """
 
-        tasks = self.tasks.list()
+        tasks = (
+            self.tasks.list()
+        )
 
-        missions = self.missions.list()
+        missions = (
+            self.missions.list()
+        )
+
+        def count_tasks(
+            status: str,
+        ) -> int:
+
+            return len(
+                [
+                    task
+                    for task in tasks
+                    if task.status
+                    == status
+                ]
+            )
+
+        def count_missions(
+            status: str,
+        ) -> int:
+
+            return len(
+                [
+                    mission
+                    for mission
+                    in missions
+                    if mission.status
+                    == status
+                ]
+            )
 
         return {
-            "workers": self.get_worker_names(),
-
+            "workers": (
+                self.get_worker_names()
+            ),
+            "session_messages": (
+                len(
+                    self.session_messages
+                )
+            ),
             "tasks": {
-                "total": len(tasks),
-
-                "pending": len(
-                    [
-                        task
-                        for task in tasks
-                        if task.status
-                        == TaskStatus.PENDING
-                    ]
+                "total": len(
+                    tasks
                 ),
-
-                "running": len(
-                    [
-                        task
-                        for task in tasks
-                        if task.status
-                        == TaskStatus.RUNNING
-                    ]
+                "pending": count_tasks(
+                    TaskStatus.PENDING
                 ),
-
-                "waiting_approval": len(
-                    [
-                        task
-                        for task in tasks
-                        if task.status
-                        == TaskStatus.WAITING_APPROVAL
-                    ]
+                "running": count_tasks(
+                    TaskStatus.RUNNING
                 ),
-
-                "blocked": len(
-                    [
-                        task
-                        for task in tasks
-                        if task.status
-                        == TaskStatus.BLOCKED
-                    ]
+                "waiting_approval": (
+                    count_tasks(
+                        TaskStatus.WAITING_APPROVAL
+                    )
                 ),
-
-                "completed": len(
-                    [
-                        task
-                        for task in tasks
-                        if task.status
-                        == TaskStatus.COMPLETED
-                    ]
+                "blocked": count_tasks(
+                    TaskStatus.BLOCKED
                 ),
-
-                "failed": len(
-                    [
-                        task
-                        for task in tasks
-                        if task.status
-                        == TaskStatus.FAILED
-                    ]
+                "completed": count_tasks(
+                    TaskStatus.COMPLETED
+                ),
+                "failed": count_tasks(
+                    TaskStatus.FAILED
                 ),
             },
-
             "missions": {
                 "total": len(
                     missions
                 ),
-
-                "pending": len(
-                    [
-                        mission
-                        for mission in missions
-                        if mission.status
-                        == MissionStatus.PENDING
-                    ]
+                "pending": (
+                    count_missions(
+                        MissionStatus.PENDING
+                    )
                 ),
-
-                "running": len(
-                    [
-                        mission
-                        for mission in missions
-                        if mission.status
-                        == MissionStatus.RUNNING
-                    ]
+                "running": (
+                    count_missions(
+                        MissionStatus.RUNNING
+                    )
                 ),
-
-                "completed": len(
-                    [
-                        mission
-                        for mission in missions
-                        if mission.status
-                        == MissionStatus.COMPLETED
-                    ]
+                "completed": (
+                    count_missions(
+                        MissionStatus.COMPLETED
+                    )
                 ),
-
-                "failed": len(
-                    [
-                        mission
-                        for mission in missions
-                        if mission.status
-                        == MissionStatus.FAILED
-                    ]
+                "failed": (
+                    count_missions(
+                        MissionStatus.FAILED
+                    )
                 ),
             },
-
             "running_workers": list(
                 self.worker_engine.running.keys()
             ),
         }
 
-    # ============================================================
-    # ARRÊT
-    # ============================================================
+    # ========================================================
+    # SHUTDOWN
+    # ========================================================
 
     def shutdown(
         self,
     ) -> None:
-        """
-        Arrête proprement le WorkerEngine.
-        """
 
         self.worker_engine.shutdown(
             wait=True

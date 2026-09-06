@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Agent-OS runtime data
+data/v2/memory/
+data/v2/tasks/
+data/v2/missions/
+data/v2/logs/
+
+# Temporary files
+*.tmp
+*.log
