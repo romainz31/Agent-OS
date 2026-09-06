@@ -1,12 +1,19 @@
 """
-Routeur déterministe du Manager Agent-OS V2.1.
+Routeur déterministe du Manager Agent-OS V2.3.1.
 
-Le LLM ne décide plus seul si une demande est :
+Le LLM ne décide pas seul si une demande est :
 - une conversation ;
 - une tâche ;
 - une mission.
 
 Python effectue d'abord un routage stable.
+
+Correction V2.3.1 :
+- les demandes de conception technique ;
+- architecture ;
+- design logiciel ;
+- structure applicative ;
+sont explicitement routées vers le Developer.
 """
 
 from __future__ import annotations
@@ -73,6 +80,7 @@ class ManagerRouter:
         "renseigner",
         "trouve-moi",
         "trouve moi",
+        "bonnes pratiques",
     )
 
     DEVELOPER_KEYWORDS = (
@@ -94,8 +102,19 @@ class ManagerRouter:
         "refactoriser",
         "implémente",
         "implémenter",
+        "architecture",
         "architecture python",
         "architecture logicielle",
+        "architecture technique",
+        "conçois",
+        "concevoir",
+        "conception",
+        "design logiciel",
+        "design technique",
+        "structure du projet",
+        "structure applicative",
+        "organise le code",
+        "organiser le code",
         "crée le fichier",
         "créé le fichier",
         "modifie le code",
@@ -194,26 +213,34 @@ class ManagerRouter:
         # MISSION
         # ========================================================
 
-        if self._is_mission(text):
+        if self._is_mission(
+            text
+        ):
 
-            worker = self._infer_first_mission_worker(
-                text,
-                available,
+            worker = (
+                self._infer_first_mission_worker(
+                    text,
+                    available,
+                )
             )
 
             return RouteDecision(
                 action="create_mission",
                 worker=worker,
-                reason="plusieurs étapes détectées",
+                reason=(
+                    "plusieurs étapes détectées"
+                ),
             )
 
         # ========================================================
         # WORKER SPÉCIALISÉ
         # ========================================================
 
-        worker = self._infer_worker(
-            text,
-            available,
+        worker = (
+            self._infer_worker(
+                text,
+                available,
+            )
         )
 
         if worker:
@@ -231,18 +258,26 @@ class ManagerRouter:
         # TRAVAIL GÉNÉRAL
         # ========================================================
 
-        if self._looks_like_work(text):
+        if self._looks_like_work(
+            text
+        ):
 
             fallback = None
 
-            if "ai_worker" in available:
-                fallback = "ai_worker"
+            if (
+                "ai_worker"
+                in available
+            ):
+                fallback = (
+                    "ai_worker"
+                )
 
             return RouteDecision(
                 action="create_task",
                 worker=fallback,
                 reason=(
-                    "demande de travail générale détectée"
+                    "demande de travail "
+                    "générale détectée"
                 ),
             )
 
@@ -252,7 +287,9 @@ class ManagerRouter:
 
         return RouteDecision(
             action="conversation",
-            reason="conversation détectée",
+            reason=(
+                "conversation détectée"
+            ),
         )
 
     def _is_mission(
@@ -265,11 +302,14 @@ class ManagerRouter:
 
         marker_count = sum(
             1
-            for marker in self.MISSION_MARKERS
+            for marker
+            in self.MISSION_MARKERS
             if marker in text
         )
 
-        if marker_count >= 2:
+        if (
+            marker_count >= 2
+        ):
             return True
 
         chained_patterns = (
@@ -279,6 +319,8 @@ class ManagerRouter:
             "analyse d'abord",
             "développe puis",
             "crée puis",
+            "conçois puis",
+            "conçois d'abord",
             "ensuite teste",
             "ensuite vérifie",
             "puis teste",
@@ -287,7 +329,8 @@ class ManagerRouter:
 
         return any(
             pattern in text
-            for pattern in chained_patterns
+            for pattern
+            in chained_patterns
         )
 
     def _infer_worker(
@@ -330,15 +373,28 @@ class ManagerRouter:
 
         for worker in priority:
 
-            if worker not in available:
+            if (
+                worker
+                not in available
+            ):
                 continue
 
-            score = scores[worker]
+            score = (
+                scores[worker]
+            )
 
-            if score > best_score:
+            if (
+                score
+                > best_score
+            ):
 
-                best_worker = worker
-                best_score = score
+                best_worker = (
+                    worker
+                )
+
+                best_score = (
+                    score
+                )
 
         return best_worker
 
@@ -348,10 +404,13 @@ class ManagerRouter:
         available: set[str],
     ) -> Optional[str]:
         """
-        Détermine le worker de la première étape.
+        Détermine le worker
+        de la première étape.
         """
 
-        first_part = text
+        first_part = (
+            text
+        )
 
         separators = (
             " ensuite ",
@@ -363,22 +422,36 @@ class ManagerRouter:
 
         indexes = []
 
-        for separator in separators:
+        for separator in (
+            separators
+        ):
 
-            index = text.find(separator)
+            index = (
+                text.find(
+                    separator
+                )
+            )
 
-            if index != -1:
-                indexes.append(index)
+            if (
+                index != -1
+            ):
+                indexes.append(
+                    index
+                )
 
         if indexes:
 
-            first_part = text[
-                :min(indexes)
-            ]
+            first_part = (
+                text[
+                    :min(indexes)
+                ]
+            )
 
-        return self._infer_worker(
-            first_part,
-            available,
+        return (
+            self._infer_worker(
+                first_part,
+                available,
+            )
         )
 
     def _looks_like_work(
@@ -386,25 +459,33 @@ class ManagerRouter:
         text: str,
     ) -> bool:
         """
-        Détecte une demande générale de travail.
+        Détecte une demande générale
+        de travail.
         """
 
         if any(
-            text.startswith(prefix)
+            text.startswith(
+                prefix
+            )
             for prefix
             in self.CONVERSATION_PREFIXES
         ):
+
             return False
 
         return any(
             verb in text
-            for verb in self.WORK_VERBS
+            for verb
+            in self.WORK_VERBS
         )
 
     @staticmethod
     def _score(
         text: str,
-        keywords: tuple[str, ...],
+        keywords: tuple[
+            str,
+            ...
+        ],
     ) -> int:
         """
         Score simple par mots-clés.
@@ -412,6 +493,7 @@ class ManagerRouter:
 
         return sum(
             1
-            for keyword in keywords
+            for keyword
+            in keywords
             if keyword in text
         )

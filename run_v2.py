@@ -1,5 +1,5 @@
 """
-Point d'entrée Agent-OS V2.2.
+Point d'entrée Agent-OS V2.3.
 
 Commandes :
 - status
@@ -26,7 +26,9 @@ class DemoWorker(
     Worker
 ):
 
-    name = "demo"
+    name = (
+        "demo"
+    )
 
     description = (
         "Worker de démonstration "
@@ -41,9 +43,11 @@ class DemoWorker(
 
         import time
 
-        title = task.get(
-            "title",
-            "Tâche inconnue",
+        title = (
+            task.get(
+                "title",
+                "Tâche inconnue",
+            )
         )
 
         print(
@@ -72,7 +76,9 @@ class DemoWorker(
                 "worker": (
                     self.name
                 ),
-                "type": "demo",
+                "type": (
+                    "demo"
+                ),
             },
         )
 
@@ -99,7 +105,7 @@ def main(
     )
 
     print(
-        "AGENT-OS V2.2 — MANAGER"
+        "AGENT-OS V2.3 — MANAGER"
     )
 
     print(
@@ -111,6 +117,10 @@ def main(
     manager = (
         Manager()
     )
+
+    # ========================================================
+    # WORKERS
+    # ========================================================
 
     manager.register_worker(
         DemoWorker()
@@ -133,7 +143,11 @@ def main(
     )
 
     manager.register_worker(
-        ResearcherWorker()
+        ResearcherWorker(
+            permissions=(
+                manager.permissions
+            )
+        )
     )
 
     manager.register_worker(
@@ -143,6 +157,10 @@ def main(
     manager.register_worker(
         TesterWorker()
     )
+
+    # ========================================================
+    # START
+    # ========================================================
 
     print(
         "Manager prêt."
@@ -192,6 +210,7 @@ def main(
                 break
 
             if not command:
+
                 continue
 
             if (
@@ -288,6 +307,8 @@ def main(
         )
 
 
-if __name__ == "__main__":
+if __name__ == (
+    "__main__"
+):
 
     main()
