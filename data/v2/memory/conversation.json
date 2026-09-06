@@ -149,5 +149,268 @@
       "action": "create_task"
     },
     "created_at": "2026-09-06T20:07:38.571986+00:00"
+  },
+  {
+    "id": "558d1410-c0a7-43f3-81dc-10b9ac1c7727",
+    "content": "Fais-moi une analyse complète de Home Assistant. Commence par expliquer ses principaux avantages, puis approfondis les possibilités d'automatisation et termine par une synthèse destinée à quelqu'un qui veut équiper sa maison.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:14:05.717941+00:00"
+  },
+  {
+    "id": "14e79d54-7d94-4ad9-931d-4117eea4aa79",
+    "content": "Tâche créée et lancée : task_48d2efe94691\nTitre : Analyse complète de Home Assistant\nPriorité : normal\nÉchéance : aucune\nWorker : ai_worker\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:14:12.908173+00:00"
+  },
+  {
+    "id": "ade736a7-7cb9-409f-914a-b23a859ff758",
+    "content": "Fais une recherche et une analyse des avantages de Home Assistant pour une maison connectée.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:17:13.384990+00:00"
+  },
+  {
+    "id": "f0bfe5c7-ee19-4e34-97d7-30489956adb9",
+    "content": "Tâche créée et lancée : task_965c5cd2823b\nTitre : Recherche et analyse des avantages de Home Assistant pour une maison connectée\nPriorité : normal\nÉchéance : aucune\nWorker : researcher\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:17:19.246736+00:00"
+  },
+  {
+    "id": "84686d69-b8e9-47c1-aa4d-f0e8b91500b2",
+    "content": "Conçois une architecture Python pour ajouter un système de plugins à Agent-OS.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:17:27.061388+00:00"
+  },
+  {
+    "id": "f9a969cb-610c-4f8d-bebf-24d792b0dcc3",
+    "content": "Tâche créée et lancée : task_1ba4353fa755\nTitre : Conception d'architecture Python pour plugin de Agent-OS\nPriorité : normal\nÉchéance : aucune\nWorker : ai_worker\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:17:38.583674+00:00"
+  },
+  {
+    "id": "9622c886-d454-4c2a-8551-a0b4d6259ddf",
+    "content": "Conçois une architecture Python pour ajouter un système de plugins à Agent-OS.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:18:18.127576+00:00"
+  },
+  {
+    "id": "887a560b-cfb3-49c2-9e28-1034d92cebea",
+    "content": "Tâche créée et lancée : task_8f40aee88c50\nTitre : Conception d'architecture Python pour plugin de Agent-OS\nPriorité : normal\nÉchéance : aucune\nWorker : ai_worker\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:18:23.993703+00:00"
+  },
+  {
+    "id": "2501415c-13f4-437a-a62f-f45e861745cd",
+    "content": "Analyse cette solution et cherche ses éventuels problèmes techniques.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:19:15.715065+00:00"
+  },
+  {
+    "id": "f991c468-c28f-4e98-9944-93211f9b8977",
+    "content": "Analyse cette solution et cherche ses éventuels problèmes techniques.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:19:48.899244+00:00"
+  },
+  {
+    "id": "ce2d32f4-dd82-4857-a99d-fa237f1b375d",
+    "content": "Je veux concevoir une nouvelle fonctionnalité pour Agent-OS. Recherche d'abord les bonnes pratiques, propose ensuite une architecture Python, puis vérifie la solution.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:20:14.022651+00:00"
+  },
+  {
+    "id": "d91cb24f-7631-47b8-82dc-aa3207f5eeee",
+    "content": "Tâche créée et lancée : task_be7ea8734d1d\nTitre : Conception d'une nouvelle fonctionnalité pour Agent-OS\nPriorité : normal\nÉchéance : aucune\nWorker : ai_worker\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:20:20.702248+00:00"
+  },
+  {
+    "id": "3f61b737-78d2-4d22-b48e-12bf7fe3b469",
+    "content": "Fais une recherche sur les meilleures pratiques pour concevoir des agents IA multi-agents.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:24:04.182882+00:00"
+  },
+  {
+    "id": "bfbca26c-66c2-4b89-9e38-4f8f9782edca",
+    "content": "Tâche créée et lancée : task_a6e35274b2fa\nTitre : Recherche sur les meilleures pratiques pour concevoir des agents IA multi-agents\nPriorité : normal\nÉchéance : aucune\nWorker : researcher\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task",
+      "assigned_agent": "researcher"
+    },
+    "created_at": "2026-09-06T20:24:10.034833+00:00"
+  },
+  {
+    "id": "5f759bde-de3c-42a4-a844-8ade5630e613",
+    "content": "Conçois une architecture Python pour ajouter un système de plugins à Agent-OS.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:24:16.345087+00:00"
+  },
+  {
+    "id": "a39a9cfe-0ab2-4fc2-b18d-5a6ecafd3618",
+    "content": "Tâche créée et lancée : task_61fd8684bca5\nTitre : Conception d'architecture Python pour plugin de Agent-OS\nPriorité : normal\nÉchéance : aucune\nWorker : developer\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task",
+      "assigned_agent": "developer"
+    },
+    "created_at": "2026-09-06T20:24:35.590717+00:00"
+  },
+  {
+    "id": "fd0b0e8b-4b58-4c3d-a1fc-dee57570dff5",
+    "content": "Analyse cette architecture et cherche ses éventuels problèmes techniques.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:25:33.754334+00:00"
+  },
+  {
+    "id": "67436503-bcb1-4ade-b5b3-0af4ec2f4a9d",
+    "content": "Analyse cette architecture et cherche ses éventuels problèmes techniques.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:25:46.846345+00:00"
+  },
+  {
+    "id": "8fd04c88-1019-4977-b6df-9db13eb54dd5",
+    "content": "Explique-moi simplement ce qu'est Agent-OS.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:26:09.472194+00:00"
+  },
+  {
+    "id": "35295058-a13e-4427-bb44-9e74257e082a",
+    "content": "Bonjour, explique-moi simplement ce qu'est Agent-OS.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:35:56.597615+00:00"
+  },
+  {
+    "id": "d309a60a-c0c6-4add-aacd-ecf2e95dd952",
+    "content": "Agent-OS est une plateforme logicielle conçue pour gérer des agents d'intelligence artificielle (IA). Elle permet de coordonner et de contrôler différents agents IA de manière flexible et modulaire. Ces agents peuvent être ajoutés ou supprimés dynamiquement, et chacun peut exécuter des tâches spécifiques ou collaborer avec les autres agents.",
+    "metadata": {
+      "role": "manager",
+      "action": "conversation"
+    },
+    "created_at": "2026-09-06T20:36:03.352745+00:00"
+  },
+  {
+    "id": "bc743300-a754-48de-9d87-6d3ea3be28f8",
+    "content": "Recherche comment fonctionne MQTT dans Home Assistant.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:36:11.370114+00:00"
+  },
+  {
+    "id": "bf356134-628a-4be9-ab98-b258002652ee",
+    "content": "Recherchez la documentation officielle de Home Assistant pour comprendre comment MQTT est intégré et utilisé.",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:36:16.330951+00:00"
+  },
+  {
+    "id": "b8410b31-f3d0-4b1a-b393-c1713b0cc9e7",
+    "content": "Crée un petit script Python qui affiche bonjour.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:36:47.654137+00:00"
+  },
+  {
+    "id": "4bb58faa-5e58-40c7-8f01-7ef730c573f0",
+    "content": "Script Python créé pour afficher 'Bonjour'.",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:36:52.031016+00:00"
+  },
+  {
+    "id": "f9305371-7c83-43c8-9d7f-ea829d6bf8bc",
+    "content": "Bonjour, explique-moi simplement ce qu'est Agent-OS.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:40:45.726285+00:00"
+  },
+  {
+    "id": "57694dd8-e53f-4779-b91c-d6252ffc40f7",
+    "content": "Agent-OS est une plateforme logicielle qui permet de gérer des agents d'intelligence artificielle de manière flexible et modulaire. Elle permet d'ajouter ou supprimer des agents et de coordonner leurs actions pour accomplir des tâches spécifiques.",
+    "metadata": {
+      "role": "manager",
+      "action": "conversation"
+    },
+    "created_at": "2026-09-06T20:40:50.177918+00:00"
+  },
+  {
+    "id": "fe0c936b-8ccc-41a5-9553-2f9555f39ec9",
+    "content": "Recherche comment fonctionne MQTT dans Home Assistant.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:41:00.446889+00:00"
+  },
+  {
+    "id": "914b7855-e19d-48a5-997f-ce3bb5410a72",
+    "content": "J'ai recherché comment MQTT fonctionne dans Home Assistant. MQTT est un protocole de messagerie basé sur messages petits et rapides, idéal pour des applications IoT. Dans Home Assistant, MQTT est utilisé pour la communication entre différents modules et périphériques. Voici un exemple de configuration pour intégrer MQTT dans Home Assistant :",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:41:06.152277+00:00"
+  },
+  {
+    "id": "c68032e1-6b4c-4dd2-8a90-38433df9640a",
+    "content": "Recherche comment fonctionne MQTT dans Home Assistant.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:43:33.858028+00:00"
+  },
+  {
+    "id": "a4b501d7-e8ec-4abd-b007-e145df15c01a",
+    "content": "{\n    \"action\": \"conversation\",\n    \"response\": \"Dans Home Assistant, MQTT est utilisé pour la communication entre différents modules et périphériques. Voici un exemple de configuration de base pour intégrer MQTT dans Home Assistant :\n\n1. Installez le composant MQTT dans Home Assistant.\n2. Configurez unebroker MQTT (par exemple, Mosquitto).\n3. Créez un script Python pour publier des messages MQTT depuis Home Assistant.\n\nVoici un exemple de script Python pour publier un message 'Bonjour' :\n\n```python\nimport paho.mqtt.client as mqtt\n\n# Configuration du broker MQTT\nbroker = \"localhost\"\ntopic = \"hello/world\"\n\ndef on_connect(client, userdata, flags, rc):\n    if rc == 0:\n        print(\"Connected to MQTT Broker!\")\n    else:\n        print(f\"Failed to connect, return code {rc}\")\n\nclient = mqtt.Client()\nclient.on_connect = on_connect\n\n# Connexion au broker\nclient.connect(broker)\n\n# Publication d'un message\nclient.publish(topic, \"Bonjour\")\n\n# Boucle d'écoute\nclient.loop_forever()\n```\n\nCe script se connecte à un broker MQTT local et publie le message 'Bonjour' sur le topic 'hello/world'.\"\n}",
+    "metadata": {
+      "role": "manager",
+      "action": "conversation"
+    },
+    "created_at": "2026-09-06T20:43:41.209064+00:00"
   }
 ]

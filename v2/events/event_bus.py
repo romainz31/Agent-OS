@@ -29,7 +29,11 @@ class Event:
     """
 
     type: str
-    data: dict[str, Any] = field(default_factory=dict)
+
+    data: dict[str, Any] = field(
+        default_factory=dict
+    )
+
     created_at: str = field(
         default_factory=lambda: datetime.now(
             timezone.utc
@@ -51,7 +55,7 @@ class EventBus:
     def __init__(self):
         self._handlers: dict[
             str,
-            list[EventHandler]
+            list[EventHandler],
         ] = defaultdict(list)
 
     def subscribe(
@@ -64,7 +68,10 @@ class EventBus:
         """
 
         if handler not in self._handlers[event_type]:
-            self._handlers[event_type].append(handler)
+
+            self._handlers[event_type].append(
+                handler
+            )
 
     def unsubscribe(
         self,
@@ -75,10 +82,16 @@ class EventBus:
         Supprime un abonnement.
         """
 
-        handlers = self._handlers.get(event_type, [])
+        handlers = self._handlers.get(
+            event_type,
+            [],
+        )
 
         if handler in handlers:
-            handlers.remove(handler)
+
+            handlers.remove(
+                handler
+            )
 
     def publish(
         self,
@@ -87,6 +100,8 @@ class EventBus:
     ) -> Event:
         """
         Publie un événement.
+
+        Les handlers reçoivent un objet Event.
         """
 
         event = Event(
@@ -101,19 +116,24 @@ class EventBus:
             )
         )
 
-        # Les erreurs d'un handler ne doivent pas empêcher
-        # les autres handlers de recevoir l'événement.
+        # Une erreur dans un handler ne doit pas
+        # empêcher les autres handlers de recevoir
+        # l'événement.
         for handler in handlers:
 
             try:
+
                 handler(event)
 
             except Exception:
+
                 traceback.print_exc()
 
         return event
 
-    def clear(self) -> None:
+    def clear(
+        self,
+    ) -> None:
         """
         Supprime tous les abonnements.
         """

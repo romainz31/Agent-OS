@@ -1,76 +1,143 @@
 """
 Manager principal Agent-OS V2.
 
-Le Manager est l'unique interlocuteur humain.
+Le Manager est l'interlocuteur principal de l'utilisateur.
 
 Responsabilités :
-- conversation
-- compréhension des demandes
-- création des tâches
-- lancement des tâches
-- suivi des tâches
-- permissions
-- événements
-- orchestration des workers
+
+    - comprendre les demandes
+    - maintenir le contexte
+    - décider de l'action
+    - créer des tâches
+    - créer des missions
+    - déléguer aux workers
+    - suivre les résultats
+    - gérer les événements
 """
 
-from typing import Any, Dict, List, Optional
-import json
+from __future__ import annotations
 
-from v2.brain.llm import LLM
-from v2.config import MANAGER_SYSTEM_PROMPT
-from v2.events.event_bus import EventBus
-from v2.memory.memory import MemoryStore
-from v2.permissions.permissions import PermissionEngine
-from v2.tasks.task_manager import TaskManager
-from v2.workers.worker import Worker
-from v2.workers.worker_engine import WorkerEngine
+from typing import Any, Optional
 
-from v2.manager.decision import ManagerDecision
+from v2.brain.llm import (
+    LLM,
+    LLMError,
+)
+
+from v2.config import (
+    OLLAMA_HOST,
+    OLLAMA_MODEL,
+)
+
+from v2.events.event_bus import (
+    Event,
+    EventBus,
+)
+
+from v2.memory.memory import (
+    MemoryStore,
+)
+
+from v2.missions.mission_manager import (
+    MissionManager,
+    MissionStatus,
+)
+
+from v2.permissions.permissions import (
+    PermissionEngine,
+)
+
+from v2.tasks.task_manager import (
+    TaskManager,
+    TaskStatus,
+)
+
+from v2.workers.worker import (
+    Worker,
+)
+
+from v2.workers.worker_engine import (
+    WorkerEngine,
+)
+
+from v2.manager.decision import (
+    ManagerDecision,
+)
 
 
 class Manager:
     """
-    Manager central d'Agent-OS.
+    Manager principal d'Agent-OS.
+
+    Le Manager ne réalise pas directement le travail technique.
+
+    Il :
+
+        1. comprend la demande
+        2. décide quoi faire
+        3. crée une tâche ou une mission
+        4. choisit un worker
+        5. lance le travail
+        6. récupère les résultats
+        7. informe l'utilisateur
     """
 
-    def __init__(self) -> None:
-        self.llm = LLM()
-        self.memory = MemoryStore()
-        self.tasks = TaskManager()
-        self.permissions = PermissionEngine()
+    # ============================================================
+    # INITIALISATION
+    # ============================================================
 
-        self.events = EventBus()
-
-        self.workers = WorkerEngine(
-            task_manager=self.tasks,
-            event_bus=self.events,
+    def __init__(
+        self,
+        llm: Optional[LLM] = None,
+        memory: Optional[MemoryStore] = None,
+        tasks: Optional[TaskManager] = None,
+        missions: Optional[MissionManager] = None,
+        permissions: Optional[PermissionEngine] = None,
+        event_bus: Optional[EventBus] = None,
+        worker_engine: Optional[WorkerEngine] = None,
+    ):
+        self.llm = llm or LLM(
+            host=OLLAMA_HOST,
+            model=OLLAMA_MODEL,
         )
 
-        self._register_event_handlers()
+        self.memory = memory or MemoryStore()
 
-    # ============================================================
-    # EVENTS
-    # ============================================================
+        self.tasks = tasks or TaskManager()
 
-    def _register_event_handlers(self) -> None:
+        # MissionManager ne prend actuellement
+        # que storage_path en argument.
+        self.missions = missions or MissionManager()
 
-        self.events.subscribe(
+        self.permissions = permissions or PermissionEngine()
+
+        self.event_bus = event_bus or EventBus()
+
+        self.worker_engine = worker_engine or WorkerEngine(
+            task_manager=self.tasks,
+            event_bus=self.event_bus,
+        )
+
+        # ========================================================
+        # ÉVÉNEMENTS
+        # ========================================================
+
+        self.event_bus.subscribe(
             "task.created",
             self._on_task_created,
         )
 
-        self.events.subscribe(
+        self.event_bus.subscribe(
             "task.started",
             self._on_task_started,
         )
 
-        self.events.subscribe(
+        self.event_bus.subscribe(
             "task.completed",
             self._on_task_completed,
         )
 
-        self.events.subscribe(
+        self.event_bus.subscribe(
             "task.failed",
             self._on_task_failed,
         )
@@ -87,19 +154,43 @@ class Manager:
         Enregistre un worker.
         """
 
-        self.workers.register(
+        self.worker_engine.register(
             worker
         )
 
+    def list_workers(
+        self,
+    ) -> list[dict[str, str]]:
+        """
+        Retourne la liste des workers disponibles.
+        """
+
+        workers = []
+
+        for name, worker in self.worker_engine.workers.items():
+
+            workers.append(
+                {
+                    "name": name,
+                    "description": getattr(
+                        worker,
+                        "description",
+                        "",
+                    ),
+                }
+            )
+
+        return workers
+
     def get_worker_names(
         self,
-    ) -> List[str]:
+    ) -> list[str]:
         """
-        Retourne les workers disponibles.
+        Retourne uniquement les noms des workers.
         """
 
         return list(
-            self.workers.workers.keys()
+            self.worker_engine.workers.keys()
         )
 
     # ============================================================
@@ -110,20 +201,17 @@ class Manager:
         self,
         message: str,
     ) -> str:
-
-        if not isinstance(
-            message,
-            str,
-        ):
-            message = str(message)
+        """
+        Point d'entrée principal du Manager.
+        """
 
         message = message.strip()
 
         if not message:
-            return "Je n'ai rien reçu."
+            return "Je n'ai reçu aucun message."
 
         # --------------------------------------------------------
-        # Mémoire conversation
+        # MÉMOIRE DE CONVERSATION
         # --------------------------------------------------------
 
         self.memory.add(
@@ -135,180 +223,247 @@ class Manager:
         )
 
         # --------------------------------------------------------
-        # Contexte
+        # CONTEXTE
         # --------------------------------------------------------
 
-        context = (
-            self.memory
-            .build_manager_context()
-        )
-
-        tasks = self._format_tasks()
-        workers = self._format_workers()
-
-        prompt = (
-            self._build_decision_prompt(
-                message=message,
-                context=context,
-                tasks=tasks,
-                workers=workers,
-            )
-        )
+        context = self.memory.build_manager_context()
 
         # --------------------------------------------------------
-        # LLM
+        # DÉCISION
         # --------------------------------------------------------
 
         try:
 
-            raw_response = self.llm.chat(
-                system_prompt=(
-                    MANAGER_SYSTEM_PROMPT
-                ),
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
+            decision = self._decide(
+                message=message,
+                context=context,
             )
 
-            decision = (
-                self._parse_decision(
-                    raw_response
-                )
+        except LLMError as exc:
+
+            return (
+                "Je n'arrive pas à contacter le modèle local.\n"
+                f"Détail : {exc}"
             )
 
         except Exception as exc:
 
-            print(
-                "[MANAGER] "
-                f"Erreur de décision : {exc}"
-            )
-
             return (
-                "Je n'ai pas réussi à interpréter "
-                "correctement ta demande. "
-                "Aucune action n'a été exécutée."
+                "Une erreur est survenue pendant "
+                "l'analyse de ta demande.\n"
+                f"Détail : {exc}"
             )
 
         # --------------------------------------------------------
-        # Exécution
+        # EXÉCUTION
         # --------------------------------------------------------
 
-        result = (
-            self._execute_decision(
-                decision
+        try:
+
+            response = self._execute_decision(
+                decision=decision,
+                original_message=message,
             )
-        )
+
+        except Exception as exc:
+
+            response = (
+                "Je n'ai pas pu exécuter la décision.\n"
+                f"Détail : {exc}"
+            )
 
         # --------------------------------------------------------
-        # Mémoire
+        # MÉMOIRE
         # --------------------------------------------------------
 
         self.memory.add(
             "conversation",
-            result,
+            response,
             metadata={
                 "role": "manager",
                 "action": decision.action,
             },
         )
 
-        return result
+        return response
 
     # ============================================================
-    # DECISION PROMPT
+    # DÉCISION
+    # ============================================================
+
+    def _decide(
+        self,
+        message: str,
+        context: str,
+    ) -> ManagerDecision:
+        """
+        Demande au LLM de déterminer l'action à effectuer.
+        """
+
+        prompt = self._build_decision_prompt(
+            message=message,
+            context=context,
+        )
+
+        raw = self.llm.simple_chat(
+            prompt=prompt,
+            system_prompt=(
+                "Tu es le Manager principal d'Agent-OS. "
+                "Tu dois analyser les demandes de l'utilisateur "
+                "et produire une décision JSON valide."
+            ),
+        )
+
+        return self._parse_decision(
+            raw=raw,
+            original_message=message,
+        )
+
+    # ============================================================
+    # PROMPT DÉCISION
     # ============================================================
 
     def _build_decision_prompt(
         self,
         message: str,
         context: str,
-        tasks: str,
-        workers: str,
     ) -> str:
+        """
+        Construit le prompt utilisé pour décider de l'action.
+        """
+
+        workers = self.list_workers()
+
+        workers_text = "\n".join(
+            (
+                f"- {worker['name']} : "
+                f"{worker['description']}"
+            )
+            for worker in workers
+        )
 
         return f"""
-Tu es le cerveau décisionnel du Manager d'Agent-OS.
+Tu es le Manager principal d'un système d'agents IA.
 
-Tu es le seul interlocuteur visible de l'utilisateur.
+Tu es l'interlocuteur direct de l'utilisateur.
 
-Tu dois comprendre son intention et choisir l'action appropriée.
-
-============================================================
-ACTIONS
-============================================================
-
-1. conversation
-2. create_task
-3. approval_required
-4. blocked
-
-============================================================
-RÈGLES
-============================================================
-
-- Discussion normale => conversation.
-- Question => conversation.
-- Demande personnelle => conversation.
-- Demande de travail concrète => create_task.
-- Action nécessitant une validation humaine
-  => approval_required.
-- Action interdite => blocked.
-
-NE FAIS JAMAIS croire à l'utilisateur qu'un travail
-a été effectué si aucun worker ne l'a réellement effectué.
+Tu dois décider ce qu'il faut faire.
 
 ============================================================
 WORKERS DISPONIBLES
 ============================================================
 
-{workers}
-
-La liste ci-dessus contient uniquement les workers
-réellement enregistrés.
-
-NE JAMAIS inventer un worker.
-
-Si une tâche peut être exécutée par un worker disponible,
-sélectionne-le obligatoirement dans assigned_agent.
-
-Pour une tâche de test générique, si "demo" existe,
-utilise :
-
-"assigned_agent": "demo"
-
-Si aucun worker ne convient :
-
-"assigned_agent": null
+{workers_text}
 
 ============================================================
-TÂCHES EXISTANTES
+RÈGLES DE ROUTAGE
 ============================================================
 
-{tasks}
+researcher :
+    Recherche web, documentation, comparaison,
+    collecte d'informations, analyse de sources.
+
+developer :
+    Python, programmation, architecture logicielle,
+    création ou modification de code.
+
+tester :
+    Tests, vérification, validation, reproduction
+    de bugs et contrôle du fonctionnement.
+
+demo :
+    Tests simples du système.
+
+ai_worker :
+    Tâches générales qui ne correspondent pas clairement
+    à un worker spécialisé.
+
+IMPORTANT :
+Tu dois privilégier un worker spécialisé lorsqu'il correspond
+à la demande.
+
+N'utilise PAS ai_worker simplement parce que la demande
+est générale.
 
 ============================================================
-MÉMOIRE
+ACTIONS POSSIBLES
+============================================================
+
+conversation
+create_task
+create_mission
+approval_required
+blocked
+
+============================================================
+QUAND UTILISER create_task
+============================================================
+
+Utilise create_task lorsqu'une seule tâche doit être exécutée.
+
+Exemples :
+
+    "Recherche comment fonctionne MQTT"
+    "Écris un script Python"
+    "Teste ce système"
+
+============================================================
+QUAND UTILISER create_mission
+============================================================
+
+Utilise create_mission lorsqu'une demande contient plusieurs
+étapes qui doivent être exécutées dans un ordre logique.
+
+Exemples :
+
+    "Recherche d'abord les solutions puis crée l'architecture
+     et enfin teste-la."
+
+    "Analyse le problème, développe une solution puis vérifie
+     qu'elle fonctionne."
+
+Une mission doit être décomposée en plusieurs étapes.
+
+============================================================
+CONVERSATION
+============================================================
+
+Utilise conversation lorsqu'aucun travail externe
+n'est nécessaire.
+
+Exemples :
+
+    "Bonjour"
+    "Explique-moi ce qu'est un agent IA"
+    "Tu penses quoi de cette architecture ?"
+
+============================================================
+APPROBATION
+============================================================
+
+Utilise approval_required lorsqu'une action nécessite
+l'autorisation explicite de l'utilisateur.
+
+============================================================
+BLOCAGE
+============================================================
+
+Utilise blocked lorsqu'une action ne doit pas être exécutée.
+
+============================================================
+PRIORITÉS
+============================================================
+
+low
+normal
+high
+critical
+
+============================================================
+CONTEXTE MÉMOIRE
 ============================================================
 
 {context}
-
-============================================================
-ÉCHÉANCE
-============================================================
-
-Si aucune échéance n'est donnée :
-
-"deadline": null
-
-Priorités autorisées :
-
-- low
-- normal
-- high
-- critical
 
 ============================================================
 MESSAGE UTILISATEUR
@@ -317,302 +472,452 @@ MESSAGE UTILISATEUR
 {message}
 
 ============================================================
-RÉPONSE
+FORMAT DE RÉPONSE
 ============================================================
 
-Réponds UNIQUEMENT avec du JSON valide.
+Réponds UNIQUEMENT avec un objet JSON.
 
-Format conversation :
+Pour conversation :
 
 {{
     "action": "conversation",
-    "response": "réponse naturelle",
-    "title": null,
-    "description": null,
-    "priority": "normal",
-    "deadline": null,
-    "assigned_agent": null,
-    "required_approval": null,
-    "metadata": {{}}
+    "response": "réponse à l'utilisateur"
 }}
 
-Format tâche :
+Pour une tâche :
 
 {{
     "action": "create_task",
-    "response": "",
+    "response": "courte explication",
     "title": "titre",
-    "description": "description précise",
+    "description": "description complète",
     "priority": "normal",
-    "deadline": null,
-    "assigned_agent": "demo",
-    "required_approval": null,
-    "metadata": {{}}
+    "assigned_agent": "researcher"
 }}
 
-NE METS AUCUN TEXTE EN DEHORS DU JSON.
+Pour une mission :
+
+{{
+    "action": "create_mission",
+    "response": "courte explication",
+    "title": "titre",
+    "objective": "objectif complet",
+    "description": "description de la mission",
+    "priority": "normal"
+}}
+
+Pour une approbation :
+
+{{
+    "action": "approval_required",
+    "response": "explication",
+    "required_approval": "action nécessitant une autorisation"
+}}
+
+Pour un blocage :
+
+{{
+    "action": "blocked",
+    "response": "explication"
+}}
 """
 
     # ============================================================
-    # WORKERS FORMAT
-    # ============================================================
-
-    def _format_workers(self) -> str:
-
-        workers = self.get_worker_names()
-
-        if not workers:
-            return "Aucun worker disponible."
-
-        lines = []
-
-        for worker_name in workers:
-
-            worker = (
-                self.workers.get_worker(
-                    worker_name
-                )
-            )
-
-            description = ""
-
-            if worker is not None:
-
-                description = (
-                    getattr(
-                        worker,
-                        "description",
-                        "",
-                    )
-                    or ""
-                )
-
-            if description:
-
-                lines.append(
-                    f"- {worker_name} : "
-                    f"{description}"
-                )
-
-            else:
-
-                lines.append(
-                    f"- {worker_name}"
-                )
-
-        return "\n".join(lines)
-
-    # ============================================================
-    # PARSING
+    # PARSING DÉCISION
     # ============================================================
 
     def _parse_decision(
         self,
-        raw_response: str,
+        raw: str,
+        original_message: str,
     ) -> ManagerDecision:
+        """
+        Convertit la réponse du LLM en ManagerDecision.
+        """
 
-        if not isinstance(
-            raw_response,
-            str,
-        ):
-            raise ValueError(
-                "La réponse du LLM doit être "
-                "une chaîne."
-            )
+        import json
 
-        text = raw_response.strip()
-
-        if text.startswith("```"):
-
-            lines = text.splitlines()
-
-            if (
-                lines
-                and lines[0]
-                .strip()
-                .startswith("```")
-            ):
-                lines = lines[1:]
-
-            if (
-                lines
-                and lines[-1].strip()
-                == "```"
-            ):
-                lines = lines[:-1]
-
-            text = "\n".join(
-                lines
-            ).strip()
-
-            if text.lower().startswith(
-                "json"
-            ):
-                text = text[4:].strip()
+        text = raw.strip()
 
         try:
 
-            data = json.loads(
-                text
+            data = json.loads(text)
+
+        except json.JSONDecodeError:
+
+            start = text.find("{")
+            end = text.rfind("}")
+
+            if start != -1 and end != -1 and end > start:
+
+                try:
+
+                    data = json.loads(
+                        text[start:end + 1]
+                    )
+
+                except json.JSONDecodeError:
+
+                    data = {}
+
+            else:
+
+                data = {}
+
+        # --------------------------------------------------------
+        # RÉPARATION DES ALIAS
+        # --------------------------------------------------------
+
+        action = str(
+            data.get(
+                "action",
+                "",
             )
+        ).strip().lower()
 
-        except json.JSONDecodeError as exc:
+        aliases = {
+            "response": "conversation",
+            "answer": "conversation",
+            "chat": "conversation",
+            "analysis": "conversation",
+            "respond": "conversation",
+            "task": "create_task",
+            "mission": "create_mission",
+            "approval": "approval_required",
+            "approve": "approval_required",
+            "deny": "blocked",
+            "block": "blocked",
+        }
 
-            raise ValueError(
-                f"Réponse JSON invalide : {exc}"
-            ) from exc
-
-        decision = (
-            ManagerDecision.from_dict(
-                data
-            )
+        action = aliases.get(
+            action,
+            action,
         )
 
-        decision.validate()
+        # --------------------------------------------------------
+        # DÉTECTION DE MISSION
+        # --------------------------------------------------------
+
+        lower_message = original_message.lower()
+
+        mission_indicators = [
+            "d'abord",
+            "ensuite",
+            "puis",
+            "enfin",
+            "après",
+            "après ça",
+            "et ensuite",
+            "première étape",
+            "deuxième étape",
+            "troisième étape",
+            "plusieurs étapes",
+            "étapes",
+            "puis teste",
+            "puis vérifie",
+            "ensuite teste",
+            "ensuite vérifie",
+            "recherche puis",
+            "analyse puis",
+            "développe puis",
+        ]
+
+        if (
+            action in {
+                "",
+                "conversation",
+                "create_task",
+            }
+            and any(
+                indicator in lower_message
+                for indicator in mission_indicators
+            )
+        ):
+            action = "create_mission"
+
+        # --------------------------------------------------------
+        # ACTION INVALIDE
+        # --------------------------------------------------------
+
+        if action not in {
+            "conversation",
+            "create_task",
+            "create_mission",
+            "approval_required",
+            "blocked",
+        }:
+
+            action = "conversation"
+
+            data = {
+                "action": "conversation",
+                "response": raw,
+            }
+
+        # --------------------------------------------------------
+        # WORKER
+        # --------------------------------------------------------
+
+        assigned_agent = data.get(
+            "assigned_agent"
+        )
+
+        if isinstance(
+            assigned_agent,
+            str,
+        ):
+
+            assigned_agent = assigned_agent.strip()
+
+        else:
+
+            assigned_agent = None
+
+        available_workers = set(
+            self.get_worker_names()
+        )
+
+        if (
+            assigned_agent
+            and assigned_agent not in available_workers
+        ):
+            assigned_agent = None
+
+        # --------------------------------------------------------
+        # ROUTAGE DÉTERMINISTE
+        # --------------------------------------------------------
+
+        if action == "create_task":
+
+            inferred_worker = self._infer_worker(
+                original_message
+            )
+
+            if inferred_worker:
+                assigned_agent = inferred_worker
+
+        # --------------------------------------------------------
+        # DÉCISION
+        # --------------------------------------------------------
+
+        data["action"] = action
+
+        if assigned_agent:
+            data["assigned_agent"] = assigned_agent
+
+        try:
+
+            decision = ManagerDecision.from_dict(
+                data
+            )
+
+        except Exception:
+
+            decision = ManagerDecision(
+                action="conversation",
+                response=(
+                    data.get(
+                        "response"
+                    )
+                    or raw
+                ),
+            )
 
         return decision
 
     # ============================================================
-    # DECISION EXECUTION
+    # ROUTAGE WORKER
+    # ============================================================
+
+    def _infer_worker(
+        self,
+        text: str,
+    ) -> Optional[str]:
+        """
+        Détermine automatiquement le worker adapté.
+        """
+
+        lower = text.lower()
+
+        available = set(
+            self.get_worker_names()
+        )
+
+        # --------------------------------------------------------
+        # TESTEUR
+        # --------------------------------------------------------
+
+        tester_keywords = [
+            "teste",
+            "tester",
+            "test",
+            "tests",
+            "tester le",
+            "tester la",
+            "vérifie",
+            "vérifier",
+            "validation",
+            "valider",
+            "bug",
+            "bugs",
+            "erreur",
+            "erreurs",
+            "fonctionne",
+            "fonctionnement",
+            "reproduire",
+            "reproduis",
+        ]
+
+        if (
+            "tester" in available
+            and any(
+                keyword in lower
+                for keyword in tester_keywords
+            )
+        ):
+            return "tester"
+
+        # --------------------------------------------------------
+        # DEVELOPER
+        # --------------------------------------------------------
+
+        developer_keywords = [
+            "python",
+            "code",
+            "coder",
+            "développe",
+            "développer",
+            "développement",
+            "programme",
+            "programmer",
+            "programmation",
+            "script",
+            "classe",
+            "fonction",
+            "api",
+            "architecture logicielle",
+            "architecture python",
+            "module",
+            "refactor",
+            "refactoriser",
+            "implémente",
+            "implémenter",
+            "créé le fichier",
+            "crée le fichier",
+            "modifier le code",
+            "modifie le code",
+        ]
+
+        if (
+            "developer" in available
+            and any(
+                keyword in lower
+                for keyword in developer_keywords
+            )
+        ):
+            return "developer"
+
+        # --------------------------------------------------------
+        # RESEARCHER
+        # --------------------------------------------------------
+
+        researcher_keywords = [
+            "recherche",
+            "rechercher",
+            "cherche",
+            "chercher",
+            "documentation",
+            "documente",
+            "documenter",
+            "web",
+            "internet",
+            "source",
+            "sources",
+            "compare",
+            "comparer",
+            "comparaison",
+            "informations",
+            "information",
+            "étude",
+            "étudier",
+            "analyse documentaire",
+        ]
+
+        if (
+            "researcher" in available
+            and any(
+                keyword in lower
+                for keyword in researcher_keywords
+            )
+        ):
+            return "researcher"
+
+        # --------------------------------------------------------
+        # DEMO
+        # --------------------------------------------------------
+
+        if "demo" in available:
+
+            if any(
+                keyword in lower
+                for keyword in [
+                    "démo",
+                    "demo",
+                    "démonstration",
+                    "démontrer",
+                ]
+            ):
+                return "demo"
+
+        # --------------------------------------------------------
+        # AI WORKER
+        # --------------------------------------------------------
+
+        if "ai_worker" in available:
+            return "ai_worker"
+
+        return None
+
+    # ============================================================
+    # EXÉCUTION DÉCISION
     # ============================================================
 
     def _execute_decision(
         self,
         decision: ManagerDecision,
+        original_message: str,
     ) -> str:
-
-        # --------------------------------------------------------
-        # CONVERSATION
-        # --------------------------------------------------------
+        """
+        Exécute la décision du Manager.
+        """
 
         if decision.action == "conversation":
 
-            return (
-                decision.response
-                or "D'accord."
-            )
-
-        # --------------------------------------------------------
-        # CREATE TASK
-        # --------------------------------------------------------
+            return decision.response
 
         if decision.action == "create_task":
 
-            assigned_agent = (
-                decision.assigned_agent
+            return self._execute_create_task(
+                decision=decision,
+                original_message=original_message,
             )
 
-            # ----------------------------------------------------
-            # Vérification worker
-            # ----------------------------------------------------
+        if decision.action == "create_mission":
 
-            if assigned_agent is not None:
-
-                if (
-                    assigned_agent
-                    not in self.workers.workers
-                ):
-
-                    print(
-                        "[MANAGER] Worker demandé "
-                        "mais indisponible : "
-                        f"{assigned_agent}"
-                    )
-
-                    assigned_agent = None
-
-            # ----------------------------------------------------
-            # Création
-            # ----------------------------------------------------
-
-            task = self.create_task(
-                title=(
-                    decision.title
-                    or "Nouvelle tâche"
-                ),
-                description=(
-                    decision.description
-                    or ""
-                ),
-                priority=decision.priority,
-                deadline=decision.deadline,
-                assigned_agent=assigned_agent,
-                metadata=decision.metadata,
+            return self._execute_create_mission(
+                decision=decision,
+                original_message=original_message,
             )
 
-            # ----------------------------------------------------
-            # Lancement
-            # ----------------------------------------------------
-
-            if assigned_agent:
-
-                started = self.start_task(
-                    task["id"]
-                )
-
-                if started:
-
-                    return (
-                        "Tâche créée et lancée : "
-                        f"{task['id']}\n"
-                        f"Titre : {task['title']}\n"
-                        f"Priorité : "
-                        f"{task['priority']}\n"
-                        f"Échéance : "
-                        f"{task['deadline'] or 'aucune'}\n"
-                        f"Worker : "
-                        f"{assigned_agent}\n"
-                        f"Statut : running"
-                    )
-
-                return (
-                    f"Tâche créée : "
-                    f"{task['id']}\n"
-                    f"Titre : {task['title']}\n"
-                    f"Worker : "
-                    f"{assigned_agent}\n"
-                    "Statut : impossible de "
-                    "démarrer automatiquement"
-                )
+        if decision.action == "approval_required":
 
             return (
-                f"Tâche créée : "
-                f"{task['id']}\n"
-                f"Titre : {task['title']}\n"
-                f"Priorité : "
-                f"{task['priority']}\n"
-                f"Échéance : "
-                f"{task['deadline'] or 'aucune'}\n"
-                "Worker : en attente d'affectation\n"
-                "Statut : pending"
-            )
-
-        # --------------------------------------------------------
-        # APPROVAL
-        # --------------------------------------------------------
-
-        if (
-            decision.action
-            == "approval_required"
-        ):
-
-            reason = (
-                decision.required_approval
+                decision.response
                 or (
                     "Cette action nécessite "
                     "ton approbation."
                 )
             )
-
-            return (
-                "Cette action nécessite ton "
-                "approbation avant de continuer.\n\n"
-                f"Raison : {reason}"
-            )
-
-        # --------------------------------------------------------
-        # BLOCKED
-        # --------------------------------------------------------
 
         if decision.action == "blocked":
 
@@ -624,285 +929,667 @@ NE METS AUCUN TEXTE EN DEHORS DU JSON.
                 )
             )
 
-        return "Aucune action effectuée."
+        return (
+            "Je n'ai pas pu déterminer quoi faire."
+        )
 
     # ============================================================
-    # TASK MANAGEMENT
+    # CRÉATION TÂCHE
     # ============================================================
 
-    def create_task(
+    def _execute_create_task(
         self,
-        title: str,
-        description: str,
-        priority: str = "normal",
-        deadline: Optional[str] = None,
-        assigned_agent: Optional[str] = None,
-        parent_task_id: Optional[str] = None,
-        metadata: Optional[
-            Dict[str, Any]
-        ] = None,
-    ) -> Dict[str, Any]:
+        decision: ManagerDecision,
+        original_message: str,
+    ) -> str:
+        """
+        Crée puis lance une tâche.
+        """
+
+        assigned_agent = (
+            decision.assigned_agent
+        )
+
+        if not assigned_agent:
+
+            assigned_agent = self._infer_worker(
+                original_message
+            )
+
+        if not assigned_agent:
+
+            return (
+                "Je n'ai trouvé aucun worker adapté "
+                "à cette tâche."
+            )
+
+        if (
+            assigned_agent
+            not in self.get_worker_names()
+        ):
+
+            return (
+                f"Le worker '{assigned_agent}' "
+                "n'est pas disponible."
+            )
+
+        task = self.tasks.create(
+            title=decision.title,
+            description=decision.description,
+            priority=decision.priority,
+            deadline=decision.deadline,
+            assigned_agent=assigned_agent,
+            metadata=decision.metadata,
+        )
+
+        self.event_bus.publish(
+            "task.created",
+            {
+                "task_id": task.id,
+                "title": task.title,
+                "assigned_agent": assigned_agent,
+            },
+        )
+
+        submitted = self.worker_engine.submit(
+            task.id
+        )
+
+        if not submitted:
+
+            return (
+                f"Tâche créée ({task.id}), "
+                "mais je n'ai pas réussi à la lancer."
+            )
+
+        return (
+            decision.response
+            or (
+                f"Tâche créée et confiée à "
+                f"{assigned_agent}."
+            )
+        )
+
+    # ============================================================
+    # CRÉATION MISSION
+    # ============================================================
+
+    def _execute_create_mission(
+        self,
+        decision: ManagerDecision,
+        original_message: str,
+    ) -> str:
+        """
+        Crée une mission et lance sa première étape.
+        """
+
+        mission = self.missions.create(
+            title=decision.title,
+            objective=(
+                decision.objective
+                or decision.description
+            ),
+            priority=decision.priority,
+            deadline=decision.deadline,
+            metadata=decision.metadata,
+        )
+
+        # --------------------------------------------------------
+        # PREMIER WORKER
+        # --------------------------------------------------------
+
+        assigned_agent = decision.assigned_agent
+
+        available = set(
+            self.get_worker_names()
+        )
+
+        if (
+            not assigned_agent
+            or assigned_agent not in available
+        ):
+            assigned_agent = self._infer_first_mission_worker(
+                original_message
+            )
+
+        if not assigned_agent:
+
+            assigned_agent = self._infer_worker(
+                decision.objective
+                or decision.description
+                or original_message
+            )
+
+        if not assigned_agent:
+
+            return (
+                f"Mission créée ({mission.id}), "
+                "mais aucun worker n'a pu être sélectionné."
+            )
+
+        # --------------------------------------------------------
+        # PREMIÈRE TÂCHE
+        # --------------------------------------------------------
+
+        task = self.tasks.create(
+            title=decision.title,
+            description=(
+                decision.objective
+                or decision.description
+            ),
+            priority=decision.priority,
+            deadline=decision.deadline,
+            assigned_agent=assigned_agent,
+            parent_task_id=None,
+            metadata={
+                "mission_id": mission.id,
+                "mission_step": 1,
+            },
+        )
+
+        self.missions.add_task(
+            mission.id,
+            task.id,
+        )
+
+        self.event_bus.publish(
+            "task.created",
+            {
+                "task_id": task.id,
+                "title": task.title,
+                "assigned_agent": assigned_agent,
+                "mission_id": mission.id,
+            },
+        )
+
+        submitted = self.worker_engine.submit(
+            task.id
+        )
+
+        if not submitted:
+
+            self.missions.fail(
+                mission.id,
+                (
+                    "Impossible de lancer "
+                    "la première tâche."
+                ),
+            )
+
+            return (
+                f"Mission {mission.id} créée, "
+                "mais la première tâche n'a pas pu démarrer."
+            )
+
+        return (
+            decision.response
+            or (
+                f"Mission {mission.id} créée. "
+                f"Première étape confiée à "
+                f"{assigned_agent}."
+            )
+        )
+
+    # ============================================================
+    # ROUTAGE PREMIÈRE ÉTAPE D'UNE MISSION
+    # ============================================================
+
+    def _infer_first_mission_worker(
+        self,
+        text: str,
+    ) -> Optional[str]:
+        """
+        Détermine le worker correspondant à la première
+        étape d'une mission.
+        """
+
+        lower = text.lower()
+
+        separators = [
+            " ensuite ",
+            " puis ",
+            " enfin ",
+            ", puis ",
+            ", ensuite ",
+            " après ",
+            " après ça ",
+        ]
+
+        first_part = lower
+
+        for separator in separators:
+
+            if separator in lower:
+
+                first_part = lower.split(
+                    separator,
+                    1,
+                )[0]
+
+        return self._infer_worker(
+            first_part
+        )
+
+    # ============================================================
+    # ÉVÉNEMENTS
+    # ============================================================
+
+    def _on_task_created(
+        self,
+        event: Event,
+    ) -> None:
+        """
+        Réagit à la création d'une tâche.
+        """
+
+        # L'EventBus transmet un objet Event.
+        # Pour l'instant aucun traitement lourd.
+        pass
+
+    def _on_task_started(
+        self,
+        event: Event,
+    ) -> None:
+        """
+        Réagit au démarrage d'une tâche.
+        """
+
+        # L'EventBus transmet un objet Event.
+        pass
+
+    def _on_task_completed(
+        self,
+        event: Event,
+    ) -> None:
+        """
+        Réagit à la fin d'une tâche.
+
+        Si la tâche appartient à une mission,
+        on tente de lancer l'étape suivante.
+        """
+
+        # IMPORTANT :
+        # EventBus transmet Event, pas dict.
+        data = event.data
+
+        task_id = data.get(
+            "task_id"
+        )
+
+        if not task_id:
+            return
+
+        task = self.tasks.get(
+            task_id
+        )
+
+        if task is None:
+            return
+
+        mission_id = task.metadata.get(
+            "mission_id"
+        )
+
+        if not mission_id:
+            return
+
+        self._continue_mission(
+            mission_id=mission_id,
+            completed_task=task,
+        )
+
+    def _on_task_failed(
+        self,
+        event: Event,
+    ) -> None:
+        """
+        Réagit à l'échec d'une tâche.
+        """
+
+        # IMPORTANT :
+        # EventBus transmet Event, pas dict.
+        data = event.data
+
+        task_id = data.get(
+            "task_id"
+        )
+
+        if not task_id:
+            return
+
+        task = self.tasks.get(
+            task_id
+        )
+
+        if task is None:
+            return
+
+        mission_id = task.metadata.get(
+            "mission_id"
+        )
+
+        if not mission_id:
+            return
+
+        error = data.get(
+            "error"
+        ) or task.error
+
+        self.missions.fail(
+            mission_id,
+            error or "Une étape de la mission a échoué.",
+        )
+
+    # ============================================================
+    # CONTINUER UNE MISSION
+    # ============================================================
+
+    def _continue_mission(
+        self,
+        mission_id: str,
+        completed_task,
+    ) -> None:
+        """
+        Demande au LLM quelle doit être la prochaine étape
+        d'une mission.
+        """
+
+        mission = self.missions.get(
+            mission_id
+        )
+
+        if mission is None:
+            return
+
+        # --------------------------------------------------------
+        # RÉCUPÉRATION DES TÂCHES
+        # --------------------------------------------------------
+
+        mission_tasks = []
+
+        for task_id in mission.task_ids:
+
+            task = self.tasks.get(
+                task_id
+            )
+
+            if task is not None:
+
+                mission_tasks.append(
+                    task
+                )
+
+        # --------------------------------------------------------
+        # CONSTRUCTION DU CONTEXTE
+        # --------------------------------------------------------
+
+        previous_result = (
+            completed_task.result
+            or "Aucun résultat."
+        )
+
+        prompt = f"""
+Une mission Agent-OS est en cours.
+
+MISSION :
+{mission.title}
+
+OBJECTIF :
+{mission.objective}
+
+ÉTAT :
+{mission.status}
+
+DERNIÈRE ÉTAPE TERMINÉE :
+{completed_task.title}
+
+RÉSULTAT :
+{previous_result}
+
+TÂCHES DÉJÀ RÉALISÉES :
+
+"""
+
+        for task in mission_tasks:
+
+            prompt += (
+                f"- {task.title} : "
+                f"{task.status}\n"
+            )
+
+        prompt += """
+
+Décide maintenant s'il reste une étape.
+
+Si la mission est terminée :
+
+{
+    "next": "complete",
+    "result": "résultat final"
+}
+
+S'il faut une nouvelle étape :
+
+{
+    "next": "task",
+    "title": "titre",
+    "description": "description précise",
+    "assigned_agent": "researcher|developer|tester|ai_worker",
+    "priority": "normal"
+}
+
+Réponds uniquement avec du JSON.
+"""
+
+        try:
+
+            raw = self.llm.simple_chat(
+                prompt=prompt,
+                system_prompt=(
+                    "Tu es le planificateur de missions "
+                    "d'Agent-OS. Réponds uniquement en JSON."
+                ),
+            )
+
+        except Exception as exc:
+
+            self.missions.fail(
+                mission_id,
+                str(exc),
+            )
+
+            return
+
+        decision = self._parse_mission_decision(
+            raw
+        )
+
+        if decision is None:
+
+            self.missions.fail(
+                mission_id,
+                "Décision de mission invalide.",
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # MISSION TERMINÉE
+        # --------------------------------------------------------
+
+        if decision.get(
+            "next"
+        ) == "complete":
+
+            result = decision.get(
+                "result"
+            )
+
+            self.missions.complete(
+                mission_id,
+                result=result,
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # NOUVELLE TÂCHE
+        # --------------------------------------------------------
+
+        if decision.get(
+            "next"
+        ) != "task":
+
+            self.missions.fail(
+                mission_id,
+                "Action de mission inconnue.",
+            )
+
+            return
+
+        title = decision.get(
+            "title"
+        )
+
+        description = decision.get(
+            "description"
+        )
+
+        assigned_agent = decision.get(
+            "assigned_agent"
+        )
+
+        priority = decision.get(
+            "priority",
+            mission.priority,
+        )
+
+        if not title or not description:
+
+            self.missions.fail(
+                mission_id,
+                "Étape de mission incomplète.",
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # ROUTAGE
+        # --------------------------------------------------------
+
+        available = set(
+            self.get_worker_names()
+        )
+
+        if assigned_agent not in available:
+
+            assigned_agent = self._infer_worker(
+                f"{title}\n{description}"
+            )
+
+        if not assigned_agent:
+
+            self.missions.fail(
+                mission_id,
+                "Aucun worker adapté à l'étape suivante.",
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # NUMÉRO D'ÉTAPE
+        # --------------------------------------------------------
+
+        step_number = (
+            len(mission.task_ids)
+            + 1
+        )
 
         task = self.tasks.create(
             title=title,
             description=description,
             priority=priority,
-            deadline=deadline,
+            deadline=mission.deadline,
             assigned_agent=assigned_agent,
-            parent_task_id=parent_task_id,
-            metadata=metadata or {},
-        )
-
-        task_dict = task.to_dict()
-
-        self.memory.add(
-            "tasks",
-            (
-                f"Tâche créée : "
-                f"{task_dict['id']} | "
-                f"Titre : "
-                f"{task_dict['title']} | "
-                f"Priorité : "
-                f"{task_dict['priority']} | "
-                f"Statut : "
-                f"{task_dict['status']} | "
-                f"Worker : "
-                f"{task_dict.get('assigned_agent') or 'non assigné'}"
-            ),
+            parent_task_id=completed_task.id,
             metadata={
-                "event": "task_created",
-                "task_id": task_dict["id"],
+                "mission_id": mission_id,
+                "mission_step": step_number,
+                "previous_task_id": completed_task.id,
+                "previous_result": previous_result,
             },
         )
 
-        self.events.publish(
+        self.missions.add_task(
+            mission_id,
+            task.id,
+        )
+
+        self.event_bus.publish(
             "task.created",
-            task_dict,
-        )
-
-        return task_dict
-
-    def start_task(
-        self,
-        task_id: str,
-    ) -> bool:
-
-        return self.workers.submit(
-            task_id
-        )
-
-    def get_tasks(
-        self,
-    ) -> List[Dict[str, Any]]:
-
-        return [
-            task.to_dict()
-            for task in self.tasks.list()
-        ]
-
-    # ============================================================
-    # PERMISSIONS
-    # ============================================================
-
-    def check_action(
-        self,
-        action: str,
-        **context: Any,
-    ) -> Dict[str, Any]:
-
-        permission = (
-            self.permissions.check(
-                action,
-                **context,
-            )
-        )
-
-        return {
-            "action": action,
-            "result": (
-                permission.result.value
-            ),
-            "reason": permission.reason,
-        }
-
-    # ============================================================
-    # EVENTS
-    # ============================================================
-
-    def _on_task_created(
-        self,
-        event: Any,
-    ) -> None:
-
-        print(
-            "[EVENT] Tâche créée : "
-            f"{event.data.get('id')}"
-        )
-
-    def _on_task_started(
-        self,
-        event: Any,
-    ) -> None:
-
-        print(
-            "[EVENT] Tâche démarrée : "
-            f"{event.data.get('task_id')}"
-        )
-
-    def _on_task_completed(
-        self,
-        event: Any,
-    ) -> None:
-
-        data = event.data
-
-        task_id = data.get(
-            "task_id"
-        )
-
-        message = data.get(
-            "message",
-            "",
-        )
-
-        result_data = data.get(
-            "data"
-        )
-
-        # --------------------------------------------------------
-        # Récupération de la tâche
-        # --------------------------------------------------------
-
-        task = self.tasks.get(
-            task_id
-        )
-
-        if task is not None:
-
-            self.tasks.complete(
-                task_id=task_id,
-                result=message,
-                data=result_data,
-            )
-
-        # --------------------------------------------------------
-        # Mémoire
-        # --------------------------------------------------------
-
-        self.memory.add(
-            "tasks",
-            (
-                f"Tâche terminée : "
-                f"{task_id} | "
-                f"Résultat : {message}"
-            ),
-            metadata={
-                "event": "task_completed",
-                "task_id": task_id,
-                "result_data": result_data,
+            {
+                "task_id": task.id,
+                "title": task.title,
+                "assigned_agent": assigned_agent,
+                "mission_id": mission_id,
             },
         )
 
-        # --------------------------------------------------------
-        # Console
-        # --------------------------------------------------------
-
-        print(
-            "[EVENT] Tâche terminée : "
-            f"{task_id}"
+        self.worker_engine.submit(
+            task.id
         )
 
-        print(
-            f"[RESULT] {message}"
-        )
+    # ============================================================
+    # PARSING MISSION
+    # ============================================================
 
-        if result_data:
-
-            print(
-                "[RESULT DATA] "
-                f"{result_data}"
-            )
-
-    def _on_task_failed(
+    def _parse_mission_decision(
         self,
-        event: Any,
-    ) -> None:
+        raw: str,
+    ) -> Optional[dict[str, Any]]:
+        """
+        Parse une décision de mission.
+        """
 
-        data = event.data
+        import json
 
-        task_id = data.get(
-            "task_id"
-        )
+        text = raw.strip()
 
-        error = data.get(
-            "error",
-            "",
-        )
+        try:
 
-        # --------------------------------------------------------
-        # Persistance
-        # --------------------------------------------------------
-
-        task = self.tasks.get(
-            task_id
-        )
-
-        if task is not None:
-
-            self.tasks.fail(
-                task_id,
-                error,
+            data = json.loads(
+                text
             )
 
-        # --------------------------------------------------------
-        # Mémoire
-        # --------------------------------------------------------
+        except json.JSONDecodeError:
 
-        self.memory.add(
-            "tasks",
-            (
-                f"Tâche échouée : "
-                f"{task_id} | "
-                f"Erreur : {error}"
-            ),
-            metadata={
-                "event": "task_failed",
-                "task_id": task_id,
-            },
-        )
+            start = text.find("{")
+            end = text.rfind("}")
 
-        print(
-            "[EVENT] Tâche échouée : "
-            f"{task_id}"
-        )
+            if (
+                start == -1
+                or end == -1
+                or end <= start
+            ):
+                return None
 
-        print(
-            f"[ERROR] {error}"
-        )
+            try:
 
-    # ============================================================
-    # TASK FORMAT
-    # ============================================================
+                data = json.loads(
+                    text[start:end + 1]
+                )
 
-    def _format_tasks(self) -> str:
+            except json.JSONDecodeError:
 
-        tasks = self.get_tasks()
+                return None
 
-        if not tasks:
-            return "Aucune tâche."
+        if not isinstance(
+            data,
+            dict,
+        ):
+            return None
 
-        lines = []
-
-        for task in tasks[-10:]:
-
-            lines.append(
-                f"- {task['id']} | "
-                f"{task['status']} | "
-                f"{task['priority']} | "
-                f"{task['title']}"
-            )
-
-        return "\n".join(lines)
+        return data
 
     # ============================================================
     # STATUS
@@ -910,56 +1597,134 @@ NE METS AUCUN TEXTE EN DEHORS DU JSON.
 
     def status(
         self,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
+        """
+        Retourne l'état global du système.
+        """
 
-        tasks = self.get_tasks()
+        tasks = self.tasks.list()
 
-        counts = {
-            "total": len(tasks),
-            "pending": 0,
-            "running": 0,
-            "completed": 0,
-            "failed": 0,
-            "waiting_approval": 0,
-            "blocked": 0,
-            "cancelled": 0,
-        }
-
-        running_task_ids = []
-
-        for task in tasks:
-
-            status = task.get(
-                "status"
-            )
-
-            if status in counts:
-                counts[status] += 1
-
-            if status == "running":
-
-                running_task_ids.append(
-                    task["id"]
-                )
+        missions = self.missions.list()
 
         return {
-            "manager": "online",
-            "model": self.llm.model,
-            "workers": (
-                self.get_worker_names()
+            "workers": self.get_worker_names(),
+
+            "tasks": {
+                "total": len(tasks),
+
+                "pending": len(
+                    [
+                        task
+                        for task in tasks
+                        if task.status
+                        == TaskStatus.PENDING
+                    ]
+                ),
+
+                "running": len(
+                    [
+                        task
+                        for task in tasks
+                        if task.status
+                        == TaskStatus.RUNNING
+                    ]
+                ),
+
+                "waiting_approval": len(
+                    [
+                        task
+                        for task in tasks
+                        if task.status
+                        == TaskStatus.WAITING_APPROVAL
+                    ]
+                ),
+
+                "blocked": len(
+                    [
+                        task
+                        for task in tasks
+                        if task.status
+                        == TaskStatus.BLOCKED
+                    ]
+                ),
+
+                "completed": len(
+                    [
+                        task
+                        for task in tasks
+                        if task.status
+                        == TaskStatus.COMPLETED
+                    ]
+                ),
+
+                "failed": len(
+                    [
+                        task
+                        for task in tasks
+                        if task.status
+                        == TaskStatus.FAILED
+                    ]
+                ),
+            },
+
+            "missions": {
+                "total": len(
+                    missions
+                ),
+
+                "pending": len(
+                    [
+                        mission
+                        for mission in missions
+                        if mission.status
+                        == MissionStatus.PENDING
+                    ]
+                ),
+
+                "running": len(
+                    [
+                        mission
+                        for mission in missions
+                        if mission.status
+                        == MissionStatus.RUNNING
+                    ]
+                ),
+
+                "completed": len(
+                    [
+                        mission
+                        for mission in missions
+                        if mission.status
+                        == MissionStatus.COMPLETED
+                    ]
+                ),
+
+                "failed": len(
+                    [
+                        mission
+                        for mission in missions
+                        if mission.status
+                        == MissionStatus.FAILED
+                    ]
+                ),
+            },
+
+            "running_workers": list(
+                self.worker_engine.running.keys()
             ),
-            "running_tasks": (
-                running_task_ids
-            ),
-            "tasks": counts,
         }
 
     # ============================================================
-    # SHUTDOWN
+    # ARRÊT
     # ============================================================
 
     def shutdown(
         self,
     ) -> None:
+        """
+        Arrête proprement le WorkerEngine.
+        """
 
-        self.workers.shutdown()
+        self.worker_engine.shutdown(
+            wait=True
+        )
