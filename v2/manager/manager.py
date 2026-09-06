@@ -1,17 +1,19 @@
 """
-Manager principal Agent-OS V2.2.
+Manager principal Agent-OS V2.2.1.
 
 Ajoute :
 - dépendances entre tâches ;
 - référence au dernier travail de la session ;
 - notifications de fin ;
 - transmission automatique du résultat entre étapes ;
-- affichage explicite task/worker/status.
+- affichage explicite task/worker/status ;
+- plan déterministe pour les missions multi-agents.
 """
 
 from __future__ import annotations
 
 import json
+import re
 
 from typing import (
     Any,
@@ -89,6 +91,15 @@ class Manager:
         "la precedente",
         "ce qu'il a fait",
         "ce qu’elle a fait",
+    )
+
+    MISSION_SPLIT_PATTERNS = (
+        r"\bd'abord\b",
+        r"\bensuite\b",
+        r"\bpuis\b",
+        r"\benfin\b",
+        r"\baprès\b",
+        r"\bapres\b",
     )
 
     def __init__(
@@ -459,9 +470,7 @@ JSON uniquement.
         ):
 
             return ManagerDecision(
-                action=(
-                    "create_task"
-                ),
+                action="create_task",
                 title=(
                     str(
                         data.get(
@@ -510,9 +519,7 @@ JSON uniquement.
             )
 
         return ManagerDecision(
-            action=(
-                "create_mission"
-            ),
+            action="create_mission",
             title=(
                 str(
                     data.get(
@@ -606,10 +613,7 @@ JSON uniquement.
 
         return (
             decision.response
-            or (
-                "Décision "
-                "non exécutable."
-            )
+            or "Décision non exécutable."
         )
 
     # ========================================================
@@ -707,10 +711,8 @@ JSON uniquement.
             return (
                 f"Tâche {task.id} créée "
                 "mais impossible à lancer.\n"
-                f"Worker : "
-                f"{assigned_agent}\n"
-                f"Statut : "
-                f"{task.status}"
+                f"Worker : {assigned_agent}\n"
+                f"Statut : {task.status}"
             )
 
         dependency_line = ""
@@ -725,12 +727,9 @@ JSON uniquement.
             )
 
         return (
-            f"Tâche créée : "
-            f"{task.id}\n"
-            f"Worker : "
-            f"{assigned_agent}\n"
-            f"Statut : "
-            f"{task.status}"
+            f"Tâche créée : {task.id}\n"
+            f"Worker : {assigned_agent}\n"
+            f"Statut : {task.status}"
             f"{dependency_line}"
         )
 
@@ -743,6 +742,40 @@ JSON uniquement.
         decision: ManagerDecision,
         original_message: str,
     ) -> str:
+
+        planned_steps = (
+            self._build_mission_plan(
+                original_message
+            )
+        )
+
+        if not planned_steps:
+
+            planned_steps = [
+                {
+                    "description": (
+                        decision.description
+                        or original_message
+                    ),
+                    "worker": (
+                        decision.assigned_agent
+                        or self._fallback_worker()
+                    ),
+                }
+            ]
+
+        metadata = dict(
+            decision.metadata
+            or {}
+        )
+
+        metadata[
+            "planned_steps"
+        ] = planned_steps
+
+        metadata[
+            "current_step_index"
+        ] = 0
 
         mission = (
             self.missions.create(
@@ -762,34 +795,20 @@ JSON uniquement.
                 deadline=(
                     decision.deadline
                 ),
-                metadata=(
-                    decision.metadata
-                ),
+                metadata=metadata,
             )
+        )
+
+        first_step = (
+            planned_steps[0]
         )
 
         assigned_agent = (
-            decision.assigned_agent
+            first_step.get(
+                "worker"
+            )
+            or self._fallback_worker()
         )
-
-        if (
-            not assigned_agent
-            or assigned_agent
-            not in self.get_worker_names()
-        ):
-
-            first_route = (
-                self.router.route(
-                    decision.description
-                    or original_message,
-                    self.get_worker_names(),
-                )
-            )
-
-            assigned_agent = (
-                first_route.worker
-                or self._fallback_worker()
-            )
 
         if not assigned_agent:
 
@@ -807,33 +826,43 @@ JSON uniquement.
                 "worker n'est disponible."
             )
 
-        task = self.tasks.create(
-            title=(
-                decision.title
-                or "Première étape"
-            ),
-            description=(
-                decision.description
-                or original_message
-            ),
-            priority=(
-                decision.priority
-            ),
-            deadline=(
-                decision.deadline
-            ),
-            assigned_agent=(
-                assigned_agent
-            ),
-            metadata={
-                "mission_id": (
-                    mission.id
+        first_description = (
+            first_step.get(
+                "description"
+            )
+            or original_message
+        )
+
+        task = (
+            self.tasks.create(
+                title=(
+                    self._fallback_title(
+                        first_description
+                    )
                 ),
-                "mission_step": 1,
-                "mission_objective": (
-                    mission.objective
+                description=(
+                    first_description
                 ),
-            },
+                priority=(
+                    decision.priority
+                ),
+                deadline=(
+                    decision.deadline
+                ),
+                assigned_agent=(
+                    assigned_agent
+                ),
+                metadata={
+                    "mission_id": (
+                        mission.id
+                    ),
+                    "mission_step": 1,
+                    "mission_step_index": 0,
+                    "mission_objective": (
+                        mission.objective
+                    ),
+                },
+            )
         )
 
         self.missions.add_task(
@@ -875,15 +904,190 @@ JSON uniquement.
         )
 
         return (
-            f"Mission créée : "
-            f"{mission.id}\n"
-            f"Première tâche : "
-            f"{task.id}\n"
-            f"Worker : "
-            f"{assigned_agent}\n"
-            f"Statut : "
-            f"{task.status}"
+            f"Mission créée : {mission.id}\n"
+            f"Étapes prévues : "
+            f"{len(planned_steps)}\n"
+            f"Première tâche : {task.id}\n"
+            f"Worker : {assigned_agent}\n"
+            f"Statut : {task.status}"
         )
+
+    def _build_mission_plan(
+        self,
+        message: str,
+    ) -> list[
+        dict[str, str]
+    ]:
+
+        cleaned = (
+            " ".join(
+                message.split()
+            )
+        )
+
+        if not cleaned:
+
+            return []
+
+        split_pattern = (
+            r"\s*(?:,|\bet\b)?\s*"
+            r"(?:d'abord|ensuite|puis|enfin|après|apres)"
+            r"\s+"
+        )
+
+        parts = re.split(
+            split_pattern,
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+        parts = [
+            part.strip(
+                " ,.;:"
+            )
+            for part
+            in parts
+            if part.strip(
+                " ,.;:"
+            )
+        ]
+
+        if len(parts) < 2:
+
+            return []
+
+        steps = []
+
+        for part in parts:
+
+            route = (
+                self.router.route(
+                    message=part,
+                    available_workers=(
+                        self.get_worker_names()
+                    ),
+                )
+            )
+
+            worker = (
+                route.worker
+            )
+
+            if not worker:
+
+                worker = (
+                    self._infer_worker_for_step(
+                        part
+                    )
+                )
+
+            if not worker:
+
+                worker = (
+                    self._fallback_worker()
+                )
+
+            if not worker:
+                continue
+
+            steps.append(
+                {
+                    "description": (
+                        part
+                    ),
+                    "worker": (
+                        worker
+                    ),
+                }
+            )
+
+        return steps
+
+    def _infer_worker_for_step(
+        self,
+        text: str,
+    ) -> Optional[str]:
+
+        lower = (
+            text.lower()
+        )
+
+        available = set(
+            self.get_worker_names()
+        )
+
+        researcher_words = (
+            "recherche",
+            "chercher",
+            "cherche",
+            "trouve",
+            "documentation",
+            "documente",
+            "analyse les sources",
+            "bonnes pratiques",
+        )
+
+        developer_words = (
+            "crée",
+            "cree",
+            "code",
+            "développe",
+            "developpe",
+            "implémente",
+            "implemente",
+            "architecture",
+            "conçois",
+            "concois",
+            "script",
+            "programme",
+        )
+
+        tester_words = (
+            "teste",
+            "test",
+            "vérifie",
+            "verifie",
+            "valide",
+            "bugs",
+            "bug",
+            "contrôle",
+            "controle",
+        )
+
+        if (
+            "tester" in available
+            and any(
+                word in lower
+                for word
+                in tester_words
+            )
+        ):
+
+            return "tester"
+
+        if (
+            "developer" in available
+            and any(
+                word in lower
+                for word
+                in developer_words
+            )
+        ):
+
+            return "developer"
+
+        if (
+            "researcher" in available
+            and any(
+                word in lower
+                for word
+                in researcher_words
+            )
+        ):
+
+            return "researcher"
+
+        return None
 
     # ========================================================
     # REFERENCES
@@ -1097,93 +1301,75 @@ JSON uniquement.
         if mission is None:
             return
 
-        previous_result = (
-            completed_task.result
-            or "Aucun résultat."
+        if (
+            mission.status
+            in {
+                MissionStatus.COMPLETED,
+                MissionStatus.FAILED,
+                MissionStatus.CANCELLED,
+            }
+        ):
+            return
+
+        planned_steps = (
+            mission.metadata.get(
+                "planned_steps",
+                [],
+            )
         )
 
-        workers = ", ".join(
-            self.get_worker_names()
+        if not isinstance(
+            planned_steps,
+            list,
+        ):
+
+            planned_steps = []
+
+        current_step_index = (
+            completed_task.metadata.get(
+                "mission_step_index",
+                0,
+            )
         )
-
-        prompt = f"""
-MISSION :
-{mission.title}
-
-OBJECTIF :
-{mission.objective}
-
-WORKERS :
-{workers}
-
-DERNIÈRE ÉTAPE :
-{completed_task.title}
-
-RÉSULTAT :
-{previous_result}
-
-Décide si la mission est terminée.
-
-Si terminée :
-
-{{
-    "next": "complete",
-    "result": "résultat final"
-}}
-
-Sinon :
-
-{{
-    "next": "task",
-    "title": "titre",
-    "description": "étape précise",
-    "priority": "normal"
-}}
-
-Ne choisis pas le worker.
-JSON uniquement.
-"""
 
         try:
 
-            raw = (
-                self.llm.simple_chat(
-                    prompt=prompt,
-                    system_prompt=(
-                        "Tu planifies "
-                        "une mission Agent-OS. "
-                        "JSON uniquement."
-                    ),
-                )
+            current_step_index = int(
+                current_step_index
             )
 
-            data = (
-                self._parse_json(
-                    raw
-                )
-            )
+        except (
+            TypeError,
+            ValueError,
+        ):
 
-        except Exception as exc:
+            current_step_index = 0
 
-            self.missions.fail(
-                mission_id,
-                str(exc),
-            )
-
-            return
+        next_step_index = (
+            current_step_index
+            + 1
+        )
 
         if (
-            data.get("next")
-            == "complete"
+            next_step_index
+            >= len(
+                planned_steps
+            )
         ):
+
+            final_result = (
+                completed_task.result
+                or (
+                    "Toutes les étapes "
+                    "de la mission "
+                    "ont été terminées."
+                )
+            )
 
             self.missions.complete(
                 mission_id,
-                result=str(
-                    data.get(
-                        "result",
-                        previous_result,
-                    )
+                result=(
+                    final_result
                 ),
             )
 
@@ -1194,38 +1380,44 @@ JSON uniquement.
 
             return
 
-        if (
-            data.get("next")
-            != "task"
+        next_step = (
+            planned_steps[
+                next_step_index
+            ]
+        )
+
+        if not isinstance(
+            next_step,
+            dict,
         ):
 
             self.missions.fail(
                 mission_id,
                 (
-                    "Décision de mission "
+                    "Étape de mission "
                     "invalide."
                 ),
             )
 
             return
 
-        title = str(
-            data.get(
-                "title",
-                "",
-            )
-        ).strip()
-
         description = str(
-            data.get(
+            next_step.get(
                 "description",
                 "",
             )
         ).strip()
 
+        assigned_agent = str(
+            next_step.get(
+                "worker",
+                "",
+            )
+        ).strip()
+
         if (
-            not title
-            or not description
+            not description
+            or not assigned_agent
         ):
 
             self.missions.fail(
@@ -1238,15 +1430,17 @@ JSON uniquement.
 
             return
 
-        route = self.router.route(
-            description,
-            self.get_worker_names(),
-        )
+        if (
+            assigned_agent
+            not in self.get_worker_names()
+        ):
 
-        assigned_agent = (
-            route.worker
-            or self._fallback_worker()
-        )
+            assigned_agent = (
+                self._infer_worker_for_step(
+                    description
+                )
+                or self._fallback_worker()
+            )
 
         if not assigned_agent:
 
@@ -1260,23 +1454,18 @@ JSON uniquement.
 
             return
 
-        step_number = (
-            len(
-                mission.task_ids
-            )
-            + 1
-        )
-
         task = (
             self.tasks.create(
-                title=title,
-                description=description,
-                priority=(
-                    self._safe_priority(
-                        data.get(
-                            "priority"
-                        )
+                title=(
+                    self._fallback_title(
+                        description
                     )
+                ),
+                description=(
+                    description
+                ),
+                priority=(
+                    mission.priority
                 ),
                 deadline=(
                     mission.deadline
@@ -1295,14 +1484,25 @@ JSON uniquement.
                         mission_id
                     ),
                     "mission_step": (
-                        step_number
+                        next_step_index
+                        + 1
+                    ),
+                    "mission_step_index": (
+                        next_step_index
                     ),
                     "previous_task_id": (
                         completed_task.id
                     ),
+                    "mission_objective": (
+                        mission.objective
+                    ),
                 },
             )
         )
+
+        mission.metadata[
+            "current_step_index"
+        ] = next_step_index
 
         self.missions.add_task(
             mission_id,
@@ -1313,13 +1513,33 @@ JSON uniquement.
             task.id
         )
 
+        self.event_bus.publish(
+            "task.created",
+            {
+                "task_id": (
+                    task.id
+                ),
+                "mission_id": (
+                    mission_id
+                ),
+                "title": (
+                    task.title
+                ),
+                "assigned_agent": (
+                    assigned_agent
+                ),
+            },
+        )
+
         self.worker_engine.submit(
             task.id
         )
 
         self.notifications.append(
             f"→ Mission {mission_id}, "
-            f"étape {step_number} : "
+            f"étape "
+            f"{next_step_index + 1}/"
+            f"{len(planned_steps)} : "
             f"{task.id} confiée à "
             f"{assigned_agent}."
         )
@@ -1573,18 +1793,39 @@ JSON uniquement.
                 "Aucune mission."
             )
 
-        return "\n".join(
-            (
+        lines = []
+
+        for mission in reversed(
+            missions
+        ):
+
+            planned_steps = (
+                mission.metadata.get(
+                    "planned_steps",
+                    [],
+                )
+            )
+
+            planned_count = (
+                len(planned_steps)
+                if isinstance(
+                    planned_steps,
+                    list,
+                )
+                else 0
+            )
+
+            lines.append(
                 f"{mission.id} | "
                 f"{mission.status} | "
                 f"{mission.title} | "
-                f"{len(mission.task_ids)} "
+                f"{len(mission.task_ids)}/"
+                f"{planned_count or len(mission.task_ids)} "
                 "étape(s)"
             )
-            for mission
-            in reversed(
-                missions
-            )
+
+        return "\n".join(
+            lines
         )
 
     def status(
