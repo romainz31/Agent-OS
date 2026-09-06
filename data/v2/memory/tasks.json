@@ -1,0 +1,100 @@
+[
+  {
+    "id": "479b4169-9480-476f-8edb-dd0458732eb4",
+    "content": "Tâche créée : Test du Worker Engine (ID: task_7ef2184827ae)",
+    "metadata": {
+      "task_id": "task_7ef2184827ae"
+    },
+    "created_at": "2026-09-06T19:42:16.571041+00:00"
+  },
+  {
+    "id": "51d6e399-4ee1-4c48-a6d0-5b207d41146b",
+    "content": "Tâche terminée task_7ef2184827ae : Le worker a terminé : Test du Worker Engine",
+    "metadata": {
+      "task_id": "task_7ef2184827ae",
+      "event": "completed"
+    },
+    "created_at": "2026-09-06T19:42:21.585974+00:00"
+  },
+  {
+    "id": "861c69a5-7f1c-4d43-8d2c-691ff67cb2b3",
+    "content": "Tâche créée : task_7087cd47ce8b | Titre : Test du système de l'assistant personnel | Priorité : normal | Statut : pending | Worker : non assigné",
+    "metadata": {
+      "event": "task_created",
+      "task_id": "task_7087cd47ce8b"
+    },
+    "created_at": "2026-09-06T19:55:48.467765+00:00"
+  },
+  {
+    "id": "6a7b1a7d-a75b-4cb2-a401-07065772d248",
+    "content": "Tâche créée : task_03eafe43b1cf | Titre : Test du système de l'assistant personnel | Priorité : normal | Statut : pending | Worker : non assigné",
+    "metadata": {
+      "event": "task_created",
+      "task_id": "task_03eafe43b1cf"
+    },
+    "created_at": "2026-09-06T20:00:57.612957+00:00"
+  },
+  {
+    "id": "3e35f7fd-464d-421b-8c85-fb73feb81444",
+    "content": "Tâche créée : task_6ee1c24a5b6b | Titre : Test du système de l'assistant personnel | Priorité : normal | Statut : pending | Worker : demo",
+    "metadata": {
+      "event": "task_created",
+      "task_id": "task_6ee1c24a5b6b"
+    },
+    "created_at": "2026-09-06T20:02:18.013901+00:00"
+  },
+  {
+    "id": "1f7069c2-d83d-4e3b-ab43-1c6577593c11",
+    "content": "Tâche terminée : task_6ee1c24a5b6b | Résultat : Le worker a terminé : Test du système de l'assistant personnel",
+    "metadata": {
+      "event": "task_completed",
+      "task_id": "task_6ee1c24a5b6b"
+    },
+    "created_at": "2026-09-06T20:02:23.032850+00:00"
+  },
+  {
+    "id": "2d27e73a-b68f-4138-bc87-8092c90c795a",
+    "content": "Tâche créée : task_d565f4310264 | Titre : Test du système de l'assistant personnel | Priorité : normal | Statut : pending | Worker : demo",
+    "metadata": {
+      "event": "task_created",
+      "task_id": "task_d565f4310264"
+    },
+    "created_at": "2026-09-06T20:05:05.635461+00:00"
+  },
+  {
+    "id": "2a38ab2b-198f-4e90-a33e-c537466fc791",
+    "content": "Tâche terminée : task_d565f4310264 | Résultat : Le worker a terminé : Test du système de l'assistant personnel",
+    "metadata": {
+      "event": "task_completed",
+      "task_id": "task_d565f4310264",
+      "result_data": {
+        "worker": "demo",
+        "task_id": "task_d565f4310264"
+      }
+    },
+    "created_at": "2026-09-06T20:05:10.641475+00:00"
+  },
+  {
+    "id": "ab950a7c-7c3a-4f32-83d4-bc0e1b45c7ea",
+    "content": "Tâche créée : task_cbc469a26afd | Titre : Explication des avantages de Home Assistant pour une maison connectée | Priorité : normal | Statut : pending | Worker : ai_worker",
+    "metadata": {
+      "event": "task_created",
+      "task_id": "task_cbc469a26afd"
+    },
+    "created_at": "2026-09-06T20:07:38.568930+00:00"
+  },
+  {
+    "id": "2b63dee1-3d47-4465-92a3-091b7d18050e",
+    "content": "Tâche terminée : task_cbc469a26afd | Résultat : 1. **Automatisation des Tâches :** Home Assistant offre la possibilité d'automatiser de nombreux aspects de la maison connectée, comme l'allumage des lumières au crépuscule, la regulation de la température en fonction de la présence dans la maison, ou encore l'ouverture des stores en fonction des conditions météorologiques.\n\n2. **Intégration de Dispositifs :** Il permet d'intégrer et de gérer de nombreux appareils de différentes marques et technologies, ce qui rend la gestion de la maison connectée plus simple et efficace.\n\n3. **Personnalisation :** Avec Home Assistant, les utilisateurs peuvent personnaliser leur système de sécurité, leurs scénarios de luminothérapie, leurs systèmes de domotique, etc., selon leurs besoins spécifiques.\n\n4. **Notifications et Alertes :** Home Assistant permet d'envoyer des notifications et des alertes en cas d'événements spécifiques, tels que des changements de statut de sécurité, des températures extrêmes, des problèmes de maintenance, etc.\n\n5. **Économies d'Energie :** En optimisant l'utilisation des appareils électriques et en automatisant les routines quotidiennes, Home Assistant peut contribuer à réduire l'utilisation d'énergie, ce qui est bénéfique à la fois pour l'environnement et la facture énergétique.",
+    "metadata": {
+      "event": "task_completed",
+      "task_id": "task_cbc469a26afd",
+      "result_data": {
+        "worker": "ai_worker",
+        "task_id": "task_cbc469a26afd",
+        "model": "qwen2.5:7b"
+      }
+    },
+    "created_at": "2026-09-06T20:07:45.813869+00:00"
+  }
+]

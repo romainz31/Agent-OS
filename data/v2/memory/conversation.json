@@ -1,0 +1,153 @@
+[
+  {
+    "id": "ff7bcf9f-b97a-4b89-b4d3-50dbe153a30a",
+    "content": "Utilisateur : salut tu va bien?",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T19:23:26.994433+00:00"
+  },
+  {
+    "id": "5f863758-f3d8-4a61-8aaf-810a8d319c24",
+    "content": "Manager : Salut ! Oui, je vais bien, merci. Et toi, comment vas-tu aujourd'hui ? Tout va bien du côté de ton projet ?",
+    "metadata": {
+      "role": "assistant"
+    },
+    "created_at": "2026-09-06T19:24:22.975485+00:00"
+  },
+  {
+    "id": "ded6f448-23f7-4f9e-8690-c78888cbffbf",
+    "content": "Utilisateur : je veux refaire mon home assistant",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T19:24:38.676201+00:00"
+  },
+  {
+    "id": "b309112b-47fc-446a-908e-f8d24a1cba3c",
+    "content": "Manager : D'accord, refaire ton home assistant semble être une excellente idée ! Tu as des idées précises sur ce que tu veux changer ou améliorer ? Par exemple, veux-tu ajouter de nouvelles fonctionnalités, améliorer la compatibilité avec d'autres appareils, ou peut-être change-tu simplement l'interface utilisateur ?",
+    "metadata": {
+      "role": "assistant"
+    },
+    "created_at": "2026-09-06T19:24:42.297032+00:00"
+  },
+  {
+    "id": "7cd30db7-d4f4-4af6-b842-0a60b2a92545",
+    "content": "bonjour manager",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T19:55:28.844248+00:00"
+  },
+  {
+    "id": "cfba3750-160d-4084-a2ef-4ead1d62d0e6",
+    "content": "Bonjour ! Comment puis-je t'aider aujourd'hui pour ton projet home assistant ?",
+    "metadata": {
+      "role": "manager",
+      "action": "conversation"
+    },
+    "created_at": "2026-09-06T19:55:34.733312+00:00"
+  },
+  {
+    "id": "e5f0ace2-7da7-4bcc-b702-7b15d4e49ae5",
+    "content": "Je veux créer une tâche pour tester le système.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T19:55:43.515307+00:00"
+  },
+  {
+    "id": "c6f97b70-2d39-4f55-92c8-40d4c31aaa3f",
+    "content": "Tâche créée : task_7087cd47ce8b\nTitre : Test du système de l'assistant personnel\nPriorité : normal\nÉchéance : aucune\nWorker : en attente d'affectation",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T19:55:48.469100+00:00"
+  },
+  {
+    "id": "4ae65c5c-ba97-4900-8192-82ebaa699860",
+    "content": "bonjour manager",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:00:39.484323+00:00"
+  },
+  {
+    "id": "dc9e27fb-e8b7-4ce7-ba32-c7797a3b95ed",
+    "content": "Bonjour ! Je suis à ta disposition pour t'aider avec ton projet home assistant. Pour commencer, as-tu des objectifs précis pour ce test du système ? Par exemple, veux-tu vérifier la compatibilité avec de nouveaux appareils, tester l'interface utilisateur, ou autre chose ?",
+    "metadata": {
+      "role": "manager",
+      "action": "conversation"
+    },
+    "created_at": "2026-09-06T20:00:44.085173+00:00"
+  },
+  {
+    "id": "a6c1a527-94b8-4b68-bee2-1b7f2241d64d",
+    "content": "Je veux créer une tâche pour tester le système.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:00:53.014665+00:00"
+  },
+  {
+    "id": "6400833c-ba46-42c5-a037-5997d644cf04",
+    "content": "Tâche créée : task_03eafe43b1cf\nTitre : Test du système de l'assistant personnel\nPriorité : normal\nÉchéance : aucune\nWorker : en attente d'affectation\nStatut : pending",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:00:57.614383+00:00"
+  },
+  {
+    "id": "340606bb-409f-471c-a2ab-50b0fcf35ffd",
+    "content": "Je veux créer une tâche pour tester le système.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:02:13.608879+00:00"
+  },
+  {
+    "id": "980918e0-03f9-46ea-a94d-1cd077311d4e",
+    "content": "Tâche créée et lancée : task_6ee1c24a5b6b\nTitre : Test du système de l'assistant personnel\nPriorité : normal\nÉchéance : aucune\nWorker : demo\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:02:18.024421+00:00"
+  },
+  {
+    "id": "f20d7acd-a354-4c43-a9a9-3e606c5f4cd8",
+    "content": "Je veux créer une tâche pour tester le système.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:05:01.168176+00:00"
+  },
+  {
+    "id": "05005949-7ef2-4270-b2ec-5b1264c943eb",
+    "content": "Tâche créée et lancée : task_d565f4310264\nTitre : Test du système de l'assistant personnel\nPriorité : normal\nÉchéance : aucune\nWorker : demo\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:05:05.638742+00:00"
+  },
+  {
+    "id": "f619ceda-118f-4ac2-bd4b-4efa502f46a2",
+    "content": "Crée une tâche qui explique en 5 points pourquoi Home Assistant est intéressant pour une maison connectée.",
+    "metadata": {
+      "role": "user"
+    },
+    "created_at": "2026-09-06T20:07:34.238530+00:00"
+  },
+  {
+    "id": "b83cf196-4ba5-4406-a21e-b2b9ac3a1ec9",
+    "content": "Tâche créée et lancée : task_cbc469a26afd\nTitre : Explication des avantages de Home Assistant pour une maison connectée\nPriorité : normal\nÉchéance : aucune\nWorker : ai_worker\nStatut : running",
+    "metadata": {
+      "role": "manager",
+      "action": "create_task"
+    },
+    "created_at": "2026-09-06T20:07:38.571986+00:00"
+  }
+]
