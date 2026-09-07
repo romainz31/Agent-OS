@@ -16,13 +16,19 @@ from agentos.llm import (
 
 @dataclass
 class PlanStep:
+
     title: str
     description: str
     worker: str
     depends_on: list[int]
 
-    def to_dict(self):
-        return asdict(self)
+    def to_dict(
+        self,
+    ):
+
+        return asdict(
+            self
+        )
 
 
 class Planner:
@@ -34,13 +40,17 @@ class Planner:
         "ai_worker",
     }
 
-    # Extension obligatoirement commencée par une lettre.
+    # =========================================================
+    # FILE DETECTION
     #
-    # hello.py       -> OUI
-    # config.json    -> OUI
-    # dashboard.yaml -> OUI
-    # V3.4           -> NON
-    # 1.25           -> NON
+    # hello.py       -> oui
+    # config.json    -> oui
+    # dashboard.yaml -> oui
+    #
+    # V3.4           -> non
+    # 1.25           -> non
+    # =========================================================
+
     FILE_RE = re.compile(
         r"(?:(?:workspace/)?"
         r"(?:[A-Za-z0-9_.-]+/)*"
@@ -56,7 +66,7 @@ class Planner:
         self.llm = llm
 
     # =========================================================
-    # JSON CLEANING
+    # JSON
     # =========================================================
 
     @staticmethod
@@ -66,7 +76,9 @@ class Planner:
 
         text = raw.strip()
 
-        if text.startswith("```"):
+        if text.startswith(
+            "```"
+        ):
 
             first_newline = (
                 text.find("\n")
@@ -79,18 +91,20 @@ class Planner:
                 ]
 
             if (
-                text.rstrip()
+                text
+                .rstrip()
                 .endswith("```")
             ):
 
                 text = (
-                    text.rstrip()[:-3]
+                    text
+                    .rstrip()[:-3]
                 )
 
         return text.strip()
 
     # =========================================================
-    # EXPLICIT FILES
+    # FILES
     # =========================================================
 
     def _explicit_files(
@@ -111,23 +125,23 @@ class Planner:
 
         for path in matches:
 
-            path = path.strip(
+            clean = path.strip(
                 "`'\".,;:()[]{} "
             )
 
             if (
-                path
-                and path not in files
+                clean
+                and clean not in files
             ):
 
                 files.append(
-                    path
+                    clean
                 )
 
         return files
 
     # =========================================================
-    # SIMPLE LOCAL DEVELOPMENT
+    # SIMPLE DEVELOPMENT
     # =========================================================
 
     def _simple_local_development(
@@ -138,14 +152,10 @@ class Planner:
     ) -> list[PlanStep] | None:
 
         """
-        Cas simple et déterministe :
-
-        Une demande Developer portant sur exactement
-        un fichier explicite donne :
+        Une demande de développement portant
+        sur exactement un fichier :
 
         Developer -> Tester
-
-        Le LLM ne décide pas du workflow.
         """
 
         if (
@@ -183,11 +193,79 @@ class Planner:
                 description=(
                     "Tester réellement "
                     f"le fichier {target} "
-                    "après la modification "
-                    "demandée par l'utilisateur."
+                    "après le travail "
+                    "du Developer."
                 ),
                 worker="tester",
-                depends_on=[0],
+                depends_on=[
+                    0
+                ],
+            ),
+        ]
+
+    # =========================================================
+    # SIMPLE RESEARCH
+    # =========================================================
+
+    def _simple_research(
+        self,
+        *,
+        message: str,
+        initial_worker: str,
+    ) -> list[PlanStep] | None:
+
+        """
+        Recherche classique sans demande de fichier :
+
+        Researcher
+            ↓
+        AIWorker
+
+        Aucun Developer.
+        Aucun Tester.
+        """
+
+        if (
+            initial_worker
+            != "researcher"
+        ):
+
+            return None
+
+        # Si un fichier explicite est demandé,
+        # la mission peut nécessiter une chaîne
+        # plus complexe : recherche + production
+        # d'un véritable fichier.
+        if self._explicit_files(
+            message
+        ):
+
+            return None
+
+        return [
+            PlanStep(
+                title=(
+                    "Effectuer la recherche"
+                ),
+                description=message,
+                worker="researcher",
+                depends_on=[],
+            ),
+            PlanStep(
+                title=(
+                    "Synthétiser les résultats"
+                ),
+                description=(
+                    "À partir uniquement des résultats "
+                    "réels obtenus par le Researcher, "
+                    "répondre clairement à la demande "
+                    "initiale de l'utilisateur. "
+                    "Ne pas inventer de sources."
+                ),
+                worker="ai_worker",
+                depends_on=[
+                    0
+                ],
             ),
         ]
 
@@ -209,7 +287,9 @@ class Planner:
                 "Le plan doit être une liste."
             )
 
-        steps: list[PlanStep] = []
+        steps: list[
+            PlanStep
+        ] = []
 
         for item in raw_steps:
 
@@ -270,7 +350,9 @@ class Planner:
 
             cleaned_dependencies = []
 
-            for dependency in dependencies:
+            for dependency in (
+                dependencies
+            ):
 
                 if not isinstance(
                     dependency,
@@ -319,158 +401,6 @@ class Planner:
         return steps
 
     # =========================================================
-    # REMOVE USELESS LOCAL RESEARCH
-    # =========================================================
-
-    def _remove_useless_local_research(
-        self,
-        steps: list[PlanStep],
-        message: str,
-    ) -> list[PlanStep]:
-
-        if not self._explicit_files(
-            message
-        ):
-
-            return steps
-
-        if not any(
-            step.worker == "developer"
-            for step
-            in steps
-        ):
-
-            return steps
-
-        useless_markers = (
-            "emplacement",
-            "localiser",
-            "localisation",
-            "trouver le fichier",
-            "chercher le fichier",
-            "rechercher le fichier",
-            "trouver l'emplacement",
-            "trouver l’emplacement",
-        )
-
-        removed_indexes = set()
-
-        for index, step in enumerate(
-            steps
-        ):
-
-            if (
-                step.worker
-                != "researcher"
-            ):
-
-                continue
-
-            text = (
-                step.title
-                + " "
-                + step.description
-            ).lower()
-
-            if any(
-                marker in text
-                for marker
-                in useless_markers
-            ):
-
-                removed_indexes.add(
-                    index
-                )
-
-        if not removed_indexes:
-
-            return steps
-
-        old_to_new = {}
-        result = []
-
-        for old_index, step in enumerate(
-            steps
-        ):
-
-            if old_index in (
-                removed_indexes
-            ):
-
-                continue
-
-            old_to_new[
-                old_index
-            ] = len(result)
-
-            result.append(
-                PlanStep(
-                    title=step.title,
-                    description=(
-                        step.description
-                    ),
-                    worker=step.worker,
-                    depends_on=[],
-                )
-            )
-
-        for old_index, step in enumerate(
-            steps
-        ):
-
-            if old_index in (
-                removed_indexes
-            ):
-
-                continue
-
-            new_index = (
-                old_to_new[
-                    old_index
-                ]
-            )
-
-            dependencies = []
-
-            for dependency in (
-                step.depends_on
-            ):
-
-                if dependency in (
-                    removed_indexes
-                ):
-
-                    continue
-
-                if dependency not in (
-                    old_to_new
-                ):
-
-                    continue
-
-                converted = (
-                    old_to_new[
-                        dependency
-                    ]
-                )
-
-                if converted not in (
-                    dependencies
-                ):
-
-                    dependencies.append(
-                        converted
-                    )
-
-            result[
-                new_index
-            ].depends_on = (
-                dependencies
-            )
-
-        return result
-
-    # =========================================================
     # WORKFLOW RULES
     # =========================================================
 
@@ -478,6 +408,11 @@ class Planner:
     def _ensure_workflow_rules(
         steps: list[PlanStep],
     ) -> list[PlanStep]:
+
+        """
+        Un véritable Developer travaillant
+        sur un fichier doit être testé.
+        """
 
         result = list(
             steps
@@ -507,6 +442,7 @@ class Planner:
                 ):
 
                     tester_exists = True
+
                     break
 
             if tester_exists:
@@ -561,7 +497,7 @@ class Planner:
             return [
                 PlanStep(
                     title=(
-                        "Réaliser la modification"
+                        "Réaliser le travail"
                     ),
                     description=message,
                     worker="developer",
@@ -577,7 +513,9 @@ class Planner:
                         "par le Developer."
                     ),
                     worker="tester",
-                    depends_on=[0],
+                    depends_on=[
+                        0
+                    ],
                 ),
             ]
 
@@ -597,15 +535,17 @@ class Planner:
                 ),
                 PlanStep(
                     title=(
-                        "Analyser les résultats"
+                        "Synthétiser les résultats"
                     ),
                     description=(
                         "Analyser les résultats "
-                        "de recherche et produire "
-                        "une synthèse exploitable."
+                        "réels du Researcher "
+                        "et produire la réponse finale."
                     ),
                     worker="ai_worker",
-                    depends_on=[0],
+                    depends_on=[
+                        0
+                    ],
                 ),
             ]
 
@@ -647,11 +587,11 @@ class Planner:
         initial_worker: str,
     ) -> list[PlanStep]:
 
-        # -----------------------------------------------------
-        # SIMPLE CASE
-        # -----------------------------------------------------
+        # =====================================================
+        # DETERMINISTIC DEVELOPMENT
+        # =====================================================
 
-        simple = (
+        simple_dev = (
             self._simple_local_development(
                 message=message,
                 initial_worker=(
@@ -660,19 +600,35 @@ class Planner:
             )
         )
 
-        if simple is not None:
+        if simple_dev is not None:
 
-            return simple
+            return simple_dev
 
-        # -----------------------------------------------------
-        # COMPLEX CASE
-        # -----------------------------------------------------
+        # =====================================================
+        # DETERMINISTIC RESEARCH
+        # =====================================================
+
+        simple_research = (
+            self._simple_research(
+                message=message,
+                initial_worker=(
+                    initial_worker
+                ),
+            )
+        )
+
+        if simple_research is not None:
+
+            return simple_research
+
+        # =====================================================
+        # COMPLEX MISSIONS
+        # =====================================================
 
         prompt = f"""
 Tu es le Planner d'Agent-OS.
 
-Ta responsabilité est uniquement de découper
-une mission complexe en tâches utiles.
+Tu découpes uniquement les missions réellement complexes.
 
 DEMANDE :
 
@@ -682,33 +638,51 @@ WORKER INITIAL :
 
 {initial_worker}
 
-WORKERS :
+WORKERS DISPONIBLES :
 
 researcher
-- recherche Internet réelle.
+- recherche des informations réelles sur Internet.
 
 developer
-- lit, crée et modifie des fichiers locaux.
-- sait lire lui-même les fichiers qu'il modifie.
+- travaille UNIQUEMENT sur de vrais fichiers du workspace.
+- ne sert jamais à rédiger une réponse textuelle simple.
 
 tester
-- vérifie réellement le résultat.
+- teste de vrais fichiers ou du code.
+- ne teste jamais une simple synthèse textuelle.
 
 ai_worker
-- analyse et synthétise.
+- analyse, synthétise et rédige des réponses.
 
 RÈGLES :
 
-1. Utilise uniquement ces workers.
-2. Maximum 8 étapes.
-3. Ne crée pas plusieurs Developers pour une
-   seule modification simple.
-4. Lire puis modifier un même fichier est UNE tâche.
-5. Ne crée pas de Researcher pour localiser un fichier
-   dont le chemin est déjà fourni.
-6. Un Developer doit normalement être suivi d'un Tester.
-7. Les approbations utilisateur ne sont jamais une tâche.
-8. Retourne uniquement du JSON valide.
+1. Maximum 8 étapes.
+
+2. Utilise uniquement les workers disponibles.
+
+3. Developer est réservé aux opérations réelles
+   sur des fichiers.
+
+4. Tester est réservé à la vérification
+   de fichiers ou de code.
+
+5. Pour une recherche simple :
+   Researcher -> AIWorker.
+
+6. Ne crée jamais Developer pour
+   "rédiger un rapport" si aucun fichier
+   de rapport n'est explicitement demandé.
+
+7. Ne crée jamais Tester pour vérifier
+   une simple réponse textuelle.
+
+8. Si le chemin d'un fichier est déjà fourni,
+   ne crée pas Researcher pour le chercher.
+
+9. Les approbations utilisateur
+   ne sont jamais des tâches.
+
+10. Retourne uniquement du JSON valide.
 
 FORMAT :
 
@@ -716,7 +690,7 @@ FORMAT :
   {{
     "title": "Titre",
     "description": "Travail exact",
-    "worker": "developer",
+    "worker": "researcher",
     "depends_on": []
   }}
 ]
@@ -729,7 +703,8 @@ FORMAT :
                 system=(
                     "Tu es le Planner "
                     "d'Agent-OS. "
-                    "JSON uniquement."
+                    "Retourne uniquement "
+                    "du JSON valide."
                 ),
             )
 
@@ -739,10 +714,8 @@ FORMAT :
                 )
             )
 
-            parsed = (
-                json.loads(
-                    cleaned
-                )
+            parsed = json.loads(
+                cleaned
             )
 
             if isinstance(
@@ -750,9 +723,11 @@ FORMAT :
                 dict,
             ):
 
-                parsed = parsed.get(
-                    "steps",
-                    [],
+                parsed = (
+                    parsed.get(
+                        "steps",
+                        [],
+                    )
                 )
 
             steps = (
@@ -774,13 +749,6 @@ FORMAT :
                     initial_worker,
                 )
             )
-
-        steps = (
-            self._remove_useless_local_research(
-                steps,
-                message,
-            )
-        )
 
         return (
             self._ensure_workflow_rules(

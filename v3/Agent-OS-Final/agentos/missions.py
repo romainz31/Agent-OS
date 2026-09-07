@@ -1,18 +1,39 @@
 from __future__ import annotations
 
+import re
 import threading
 import uuid
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+
+from dataclasses import (
+    asdict,
+    dataclass,
+    field,
+)
+
+from datetime import (
+    datetime,
+    timezone,
+)
+
 from typing import Any
 
-from agentos.config import DATA_DIR
-from agentos.storage import JsonStore
-from agentos.tasks import TaskManager, TaskStatus
+from agentos.config import (
+    DATA_DIR,
+)
+
+from agentos.storage import (
+    JsonStore,
+)
+
+from agentos.tasks import (
+    TaskManager,
+    TaskStatus,
+)
 
 
 @dataclass
 class Mission:
+
     id: str
     title: str
     description: str
@@ -20,28 +41,62 @@ class Mission:
     created_at: str
     updated_at: str
 
-    task_ids: list[str] = field(default_factory=list)
-    plan: list[dict[str, Any]] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    human_id: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+    task_ids: list[str] = field(
+        default_factory=list
+    )
+
+    plan: list[
+        dict[str, Any]
+    ] = field(
+        default_factory=list
+    )
+
+    metadata: dict[
+        str,
+        Any,
+    ] = field(
+        default_factory=dict
+    )
+
+    def to_dict(
+        self,
+    ) -> dict[str, Any]:
+
+        return asdict(
+            self
+        )
 
 
 class MissionManager:
 
-    def __init__(self) -> None:
+    HUMAN_ID_RE = re.compile(
+        r"^M-(\d+)$",
+        flags=re.IGNORECASE,
+    )
+
+    def __init__(
+        self,
+    ) -> None:
 
         self.store = JsonStore(
             DATA_DIR / "missions.json",
             [],
         )
 
-        self.lock = threading.RLock()
+        self.lock = (
+            threading.RLock()
+        )
 
-        self.missions: dict[str, Mission] = {}
+        self.missions: dict[
+            str,
+            Mission,
+        ] = {}
 
         self._load()
+
+        self._repair_human_ids()
 
     # =========================================================
     # INTERNAL
@@ -49,13 +104,34 @@ class MissionManager:
 
     @staticmethod
     def _now() -> str:
+
         return datetime.now(
             timezone.utc
         ).isoformat()
 
-    def _load(self) -> None:
+    def _load(
+        self,
+    ) -> None:
 
-        for item in self.store.load():
+        loaded = (
+            self.store.load()
+        )
+
+        if not isinstance(
+            loaded,
+            list,
+        ):
+
+            loaded = []
+
+        for item in loaded:
+
+            if not isinstance(
+                item,
+                dict,
+            ):
+
+                continue
 
             try:
 
@@ -63,15 +139,17 @@ class MissionManager:
                     **item
                 )
 
-                self.missions[
-                    mission.id
-                ] = mission
-
             except TypeError:
 
-                pass
+                continue
 
-    def _save(self) -> None:
+            self.missions[
+                mission.id
+            ] = mission
+
+    def _save(
+        self,
+    ) -> None:
 
         self.store.save(
             [
@@ -82,6 +160,117 @@ class MissionManager:
         )
 
     # =========================================================
+    # HUMAN IDS
+    # =========================================================
+
+    def _used_human_numbers(
+        self,
+    ) -> set[int]:
+
+        numbers = set()
+
+        for mission in (
+            self.missions.values()
+        ):
+
+            match = (
+                self.HUMAN_ID_RE.match(
+                    mission.human_id
+                    or ""
+                )
+            )
+
+            if match:
+
+                numbers.add(
+                    int(
+                        match.group(1)
+                    )
+                )
+
+        return numbers
+
+    def _next_human_id(
+        self,
+    ) -> str:
+
+        used = (
+            self._used_human_numbers()
+        )
+
+        number = 1
+
+        while number in used:
+
+            number += 1
+
+        return (
+            f"M-{number:03d}"
+        )
+
+    def _repair_human_ids(
+        self,
+    ) -> None:
+
+        changed = False
+
+        used = set()
+
+        missions = sorted(
+            self.missions.values(),
+            key=lambda mission: (
+                mission.created_at
+            ),
+        )
+
+        for mission in missions:
+
+            current = (
+                mission.human_id
+                or ""
+            )
+
+            match = (
+                self.HUMAN_ID_RE.match(
+                    current
+                )
+            )
+
+            if match:
+
+                number = int(
+                    match.group(1)
+                )
+
+                if number not in used:
+
+                    used.add(
+                        number
+                    )
+
+                    continue
+
+            number = 1
+
+            while number in used:
+
+                number += 1
+
+            mission.human_id = (
+                f"M-{number:03d}"
+            )
+
+            used.add(
+                number
+            )
+
+            changed = True
+
+        if changed:
+
+            self._save()
+
+    # =========================================================
     # CREATE
     # =========================================================
 
@@ -90,7 +279,11 @@ class MissionManager:
         *,
         title: str,
         description: str,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[
+            str,
+            Any,
+        ]
+        | None = None,
     ) -> Mission:
 
         with self.lock:
@@ -100,14 +293,21 @@ class MissionManager:
             mission = Mission(
                 id=(
                     "mission_"
-                    + uuid.uuid4().hex[:10]
+                    + uuid.uuid4()
+                    .hex[:10]
+                ),
+                human_id=(
+                    self._next_human_id()
                 ),
                 title=title,
                 description=description,
                 status="planning",
                 created_at=now,
                 updated_at=now,
-                metadata=metadata or {},
+                metadata=(
+                    metadata
+                    or {}
+                ),
             )
 
             self.missions[
@@ -131,6 +331,60 @@ class MissionManager:
             mission_id
         )
 
+    def get_by_human_id(
+        self,
+        human_id: str,
+    ) -> Mission | None:
+
+        wanted = (
+            human_id
+            .strip()
+            .upper()
+        )
+
+        for mission in (
+            self.missions.values()
+        ):
+
+            if (
+                mission.human_id
+                .upper()
+                == wanted
+            ):
+
+                return mission
+
+        return None
+
+    def resolve(
+        self,
+        reference: str,
+    ) -> Mission | None:
+
+        reference = (
+            reference.strip()
+        )
+
+        if not reference:
+
+            return None
+
+        direct = (
+            self.get(
+                reference
+            )
+        )
+
+        if direct is not None:
+
+            return direct
+
+        return (
+            self.get_by_human_id(
+                reference
+            )
+        )
+
     def list(
         self,
     ) -> list[Mission]:
@@ -151,15 +405,19 @@ class MissionManager:
         self,
         mission_id: str,
         *,
-        plan: list[dict[str, Any]],
+        plan: list[
+            dict[str, Any]
+        ],
         task_ids: list[str],
     ) -> Mission:
 
         with self.lock:
 
-            mission = self.missions[
-                mission_id
-            ]
+            mission = (
+                self.missions[
+                    mission_id
+                ]
+            )
 
             mission.plan = plan
 
@@ -196,7 +454,9 @@ class MissionManager:
             return mission
 
         linked = [
-            tasks.get(task_id)
+            tasks.get(
+                task_id
+            )
             for task_id
             in mission.task_ids
         ]
@@ -263,11 +523,16 @@ class MissionManager:
 
             status = "queued"
 
-        if mission.status != status:
+        if (
+            mission.status
+            != status
+        ):
 
             with self.lock:
 
-                mission.status = status
+                mission.status = (
+                    status
+                )
 
                 mission.updated_at = (
                     self._now()
@@ -276,6 +541,77 @@ class MissionManager:
                 self._save()
 
         return mission
+
+    # =========================================================
+    # PROGRESS
+    # =========================================================
+
+    def progress(
+        self,
+        mission: Mission,
+        tasks: TaskManager,
+    ) -> tuple[
+        int,
+        int,
+    ]:
+
+        completed = 0
+
+        total = len(
+            mission.task_ids
+        )
+
+        for task_id in (
+            mission.task_ids
+        ):
+
+            task = tasks.get(
+                task_id
+            )
+
+            if (
+                task is not None
+                and task.status
+                == TaskStatus.COMPLETED.value
+            ):
+
+                completed += 1
+
+        return (
+            completed,
+            total,
+        )
+
+    # =========================================================
+    # ACTIVE
+    # =========================================================
+
+    def active(
+        self,
+        tasks: TaskManager,
+    ) -> list[Mission]:
+
+        result = []
+
+        for mission in self.list():
+
+            self.refresh(
+                mission,
+                tasks,
+            )
+
+            if mission.status in {
+                "planning",
+                "queued",
+                "running",
+                "waiting_approval",
+            }:
+
+                result.append(
+                    mission
+                )
+
+        return result
 
     # =========================================================
     # DISPLAY
@@ -288,9 +624,11 @@ class MissionManager:
 
         if not self.missions:
 
-            return "Aucune mission."
+            return (
+                "Aucune mission."
+            )
 
-        sections: list[str] = []
+        sections = []
 
         for mission in self.list():
 
@@ -299,10 +637,18 @@ class MissionManager:
                 tasks,
             )
 
+            completed, total = (
+                self.progress(
+                    mission,
+                    tasks,
+                )
+            )
+
             lines = [
                 (
-                    f"{mission.id} | "
+                    f"{mission.human_id} | "
                     f"{mission.status} | "
+                    f"{completed}/{total} | "
                     f"{mission.title}"
                 )
             ]
@@ -321,7 +667,6 @@ class MissionManager:
                     lines.append(
                         (
                             f"  {index}. "
-                            f"{task_id} | "
                             "introuvable"
                         )
                     )
@@ -338,7 +683,9 @@ class MissionManager:
                 )
 
             sections.append(
-                "\n".join(lines)
+                "\n".join(
+                    lines
+                )
             )
 
         return "\n\n".join(

@@ -19,9 +19,7 @@ def notification_loop(
             manager.drain_notifications()
         )
 
-        for notification in (
-            notifications
-        ):
+        for notification in notifications:
 
             print()
 
@@ -48,7 +46,7 @@ def main() -> None:
     )
 
     print(
-        "AGENT-OS V3.4 — MANAGER"
+        "AGENT-OS V3.5 — MULTI-MISSIONS"
     )
 
     print(
@@ -58,11 +56,12 @@ def main() -> None:
     print(
         "\nCommandes : "
         "status | missions | tasks | "
-        "approvals | memory | "
-        "oui | non | quit\n"
+        "approvals | memory | quit\n"
     )
 
-    manager = Manager()
+    manager = (
+        Manager()
+    )
 
     stop_notifications = (
         threading.Event()
@@ -100,13 +99,12 @@ def main() -> None:
 
                 break
 
-            command = (
+            if (
                 message
                 .strip()
                 .lower()
-            )
-
-            if command == "quit":
+                == "quit"
+            ):
 
                 break
 
@@ -150,12 +148,10 @@ def main() -> None:
 
         manager.shutdown()
 
-        remaining = (
+        for notification in (
             manager
             .drain_notifications()
-        )
-
-        for notification in remaining:
+        ):
 
             print()
 
