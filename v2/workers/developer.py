@@ -125,29 +125,14 @@ class DeveloperWorker(Worker):
 
         text = raw.strip()
 
-        if text.startswith(
-            "```json"
-        ):
+        if text.startswith("```json"):
+            text = text[len("```json"):].strip()
 
-            text = text[
-                len("```json"):
-            ].strip()
+        elif text.startswith("```"):
+            text = text[len("```"):].strip()
 
-        elif text.startswith(
-            "```"
-        ):
-
-            text = text[
-                len("```"):
-            ].strip()
-
-        if text.endswith(
-            "```"
-        ):
-
-            text = text[
-                :-3
-            ].strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
 
         try:
 
@@ -159,46 +144,34 @@ class DeveloperWorker(Worker):
                 data,
                 dict,
             ):
-
                 return data
 
         except json.JSONDecodeError:
-
             pass
 
-        start = text.find(
-            "{"
-        )
-
-        end = text.rfind(
-            "}"
-        )
+        start = text.find("{")
+        end = text.rfind("}")
 
         if (
             start == -1
             or end == -1
             or end <= start
         ):
-
             return {}
 
         try:
 
             data = json.loads(
-                text[
-                    start:end + 1
-                ]
+                text[start:end + 1]
             )
 
         except json.JSONDecodeError:
-
             return {}
 
         if not isinstance(
             data,
             dict,
         ):
-
             return {}
 
         return data
@@ -219,14 +192,12 @@ class DeveloperWorker(Worker):
             word in lower
             for word in cls.CREATE_WORDS
         ):
-
             return "create"
 
         if any(
             word in lower
             for word in cls.MODIFY_WORDS
         ):
-
             return "modify"
 
         return "analysis"
@@ -243,22 +214,10 @@ class DeveloperWorker(Worker):
 
         normalized = (
             text
-            .replace(
-                "\\",
-                "/",
-            )
-            .replace(
-                "`",
-                " ",
-            )
-            .replace(
-                '"',
-                " ",
-            )
-            .replace(
-                "'",
-                " ",
-            )
+            .replace("\\", "/")
+            .replace("`", " ")
+            .replace('"', " ")
+            .replace("'", " ")
         )
 
         candidates = re.findall(
@@ -281,9 +240,7 @@ class DeveloperWorker(Worker):
             candidate = (
                 candidate
                 .strip()
-                .strip(
-                    ".,;:()[]{}"
-                )
+                .strip(".,;:()[]{}")
             )
 
             suffix = (
@@ -292,21 +249,11 @@ class DeveloperWorker(Worker):
                 .lower()
             )
 
-            if (
-                suffix
-                not in cls.FILE_EXTENSIONS
-            ):
-
+            if suffix not in cls.FILE_EXTENSIONS:
                 continue
 
-            if (
-                candidate
-                not in paths
-            ):
-
-                paths.append(
-                    candidate
-                )
+            if candidate not in paths:
+                paths.append(candidate)
 
         return paths
 
@@ -320,9 +267,7 @@ class DeveloperWorker(Worker):
         request: str,
     ) -> str:
 
-        lower = (
-            request.lower()
-        )
+        lower = request.lower()
 
         concerns_v2 = (
             "agent-os v2" in lower
@@ -332,38 +277,24 @@ class DeveloperWorker(Worker):
         )
 
         if not concerns_v2:
-
             return tree
 
-        lines = (
-            tree.splitlines()
-        )
+        lines = tree.splitlines()
 
         priority_lines = []
-
         other_lines = []
 
         for line in lines:
 
             if (
-                line.startswith(
-                    "v2/"
-                )
+                line.startswith("v2/")
                 or line == "v2/"
-                or line.startswith(
-                    "run_v2.py"
-                )
+                or line.startswith("run_v2.py")
             ):
-
-                priority_lines.append(
-                    line
-                )
+                priority_lines.append(line)
 
             else:
-
-                other_lines.append(
-                    line
-                )
+                other_lines.append(line)
 
         return "\n".join(
             priority_lines
@@ -387,31 +318,23 @@ class DeveloperWorker(Worker):
 
             result = (
                 self.project_tool
-                .read_file(
-                    path
-                )
+                .read_file(path)
             )
 
-            return (
-                result.to_dict()
-            )
+            return result.to_dict()
 
         except ProjectToolError as exc:
 
             return {
                 "path": path,
-                "error": str(
-                    exc
-                ),
+                "error": str(exc),
             }
 
         except Exception as exc:
 
             return {
                 "path": path,
-                "error": str(
-                    exc
-                ),
+                "error": str(exc),
             }
 
     # ========================================================
@@ -464,54 +387,35 @@ Retourne uniquement du JSON :
 
         try:
 
-            raw = (
-                self.llm.simple_chat(
-                    prompt=prompt,
-                    system_prompt=(
-                        "Sélection de fichiers. "
-                        "JSON uniquement."
-                    ),
-                )
+            raw = self.llm.simple_chat(
+                prompt=prompt,
+                system_prompt=(
+                    "Sélection de fichiers. "
+                    "JSON uniquement."
+                ),
             )
 
         except Exception:
-
             return []
 
-        data = (
-            self._parse_json(
-                raw
-            )
-        )
+        data = self._parse_json(raw)
 
         files = data.get(
             "files_to_read",
             [],
         )
 
-        if not isinstance(
-            files,
-            list,
-        ):
-
+        if not isinstance(files, list):
             return []
 
         result = []
 
         for item in files[:6]:
 
-            path = str(
-                item
-            ).strip()
+            path = str(item).strip()
 
-            if (
-                path
-                and path not in result
-            ):
-
-                result.append(
-                    path
-                )
+            if path and path not in result:
+                result.append(path)
 
         return result
 
@@ -521,16 +425,11 @@ Retourne uniquement du JSON :
 
     @staticmethod
     def _format_file_context(
-        read_results: list[
-            dict[str, Any]
-        ],
+        read_results: list[dict[str, Any]],
     ) -> str:
 
         if not read_results:
-
-            return (
-                "(aucun fichier lu)"
-            )
+            return "(aucun fichier lu)"
 
         sections = []
 
@@ -563,12 +462,10 @@ Retourne uniquement du JSON :
                 )
             )
 
-        return "\n\n".join(
-            sections
-        )
+        return "\n\n".join(sections)
 
     # ========================================================
-    # RAW FILE CONTENT CLEANING
+    # RAW CONTENT
     # ========================================================
 
     @staticmethod
@@ -576,48 +473,25 @@ Retourne uniquement du JSON :
         raw: str,
     ) -> str:
 
-        text = (
-            raw.strip()
-        )
+        text = raw.strip()
 
         if not text:
-
             return ""
 
-        # Le modèle peut malgré tout ajouter
-        # un bloc Markdown.
-        if text.startswith(
-            "```"
-        ):
+        if text.startswith("```"):
 
-            first_newline = (
-                text.find(
-                    "\n"
-                )
-            )
+            first_newline = text.find("\n")
 
             if first_newline != -1:
+                text = text[first_newline + 1:]
 
-                text = text[
-                    first_newline + 1:
-                ]
+            if text.rstrip().endswith("```"):
+                text = text.rstrip()[:-3]
 
-            if text.rstrip().endswith(
-                "```"
-            ):
-
-                text = (
-                    text.rstrip()[
-                        :-3
-                    ]
-                )
-
-        return (
-            text.strip()
-        )
+        return text.strip()
 
     # ========================================================
-    # GENERATE ONE FILE
+    # GENERATE FILE
     # ========================================================
 
     def _generate_file_content(
@@ -670,8 +544,6 @@ Crée son contenu complet conformément
         prompt = f"""
 Tu es le Developer d'Agent-OS V2.
 
-Tu travailles sur un vrai projet.
-
 ============================================================
 DEMANDE ORIGINALE
 ============================================================
@@ -679,7 +551,7 @@ DEMANDE ORIGINALE
 {original_message or description}
 
 ============================================================
-TITRE DE TÂCHE
+TITRE
 ============================================================
 
 {title}
@@ -703,13 +575,13 @@ OPÉRATION
 {operation}
 
 ============================================================
-CONTEXTE DES TÂCHES PRÉCÉDENTES
+CONTEXTE
 ============================================================
 
 {dependency_context or "(aucun)"}
 
 ============================================================
-ARBORESCENCE DU PROJET
+ARBORESCENCE
 ============================================================
 
 {project_tree}
@@ -719,41 +591,28 @@ ARBORESCENCE DU PROJET
 {operation_instruction}
 
 ============================================================
-FORMAT DE RÉPONSE OBLIGATOIRE
+FORMAT OBLIGATOIRE
 ============================================================
 
 Retourne UNIQUEMENT le contenu complet final
 du fichier {target_path}.
 
 Aucune explication.
-
 Aucun JSON.
-
-Aucun texte avant le fichier.
-
-Aucun texte après le fichier.
-
-N'utilise PAS de bloc Markdown ```.
-
-Commence directement par le premier caractère
-qui doit réellement être présent dans le fichier.
+Aucun bloc Markdown.
 """
 
-        raw = (
-            self.llm.simple_chat(
-                prompt=prompt,
-                system_prompt=(
-                    "Tu es le Developer Agent-OS. "
-                    "Tu retournes uniquement "
-                    "le contenu final du fichier demandé."
-                ),
-            )
+        raw = self.llm.simple_chat(
+            prompt=prompt,
+            system_prompt=(
+                "Tu es le Developer Agent-OS. "
+                "Retourne uniquement le contenu "
+                "final du fichier demandé."
+            ),
         )
 
-        return (
-            self._clean_generated_content(
-                raw
-            )
+        return self._clean_generated_content(
+            raw
         )
 
     # ========================================================
@@ -774,19 +633,13 @@ qui doit réellement être présent dans le fichier.
             self._select_analysis_files(
                 title=title,
                 description=description,
-                dependency_context=(
-                    dependency_context
-                ),
-                project_tree=(
-                    project_tree
-                ),
+                dependency_context=dependency_context,
+                project_tree=project_tree,
             )
         )
 
         read_results = [
-            self._read_file(
-                path
-            )
+            self._read_file(path)
             for path in files_to_read
         ]
 
@@ -827,14 +680,12 @@ Produis un rapport technique clair en français.
 
         try:
 
-            report = (
-                self.llm.simple_chat(
-                    prompt=prompt,
-                    system_prompt=(
-                        "Tu produis un rapport "
-                        "technique Agent-OS."
-                    ),
-                )
+            report = self.llm.simple_chat(
+                prompt=prompt,
+                system_prompt=(
+                    "Tu produis un rapport "
+                    "technique Agent-OS."
+                ),
             )
 
         except LLMError as exc:
@@ -845,9 +696,7 @@ Produis un rapport technique clair en français.
                     "Le Developer ne peut pas "
                     "contacter le modèle."
                 ),
-                error=str(
-                    exc
-                ),
+                error=str(exc),
             )
 
         except Exception as exc:
@@ -857,30 +706,20 @@ Produis un rapport technique clair en français.
                 message=(
                     "Erreur d'analyse Developer."
                 ),
-                error=str(
-                    exc
-                ),
+                error=str(exc),
             )
 
         return WorkerResult(
             success=True,
-            message=(
-                report.strip()
-            ),
+            message=report.strip(),
             data={
                 "worker": self.name,
                 "type": "development",
-                "task_id": task.get(
-                    "id"
-                ),
+                "task_id": task.get("id"),
                 "model": self.llm.model,
                 "operation": "analysis",
-                "files_requested": (
-                    files_to_read
-                ),
-                "files_read": (
-                    read_results
-                ),
+                "files_requested": files_to_read,
+                "files_read": read_results,
                 "writes": [],
                 "created_files": [],
                 "modified_files": [],
@@ -890,7 +729,7 @@ Produis un rapport technique clair en français.
         )
 
     # ========================================================
-    # EXPLICIT FILE OPERATION
+    # FILE OPERATION
     # ========================================================
 
     def _execute_file_operation(
@@ -911,47 +750,25 @@ Produis un rapport technique clair en français.
             return WorkerResult(
                 success=False,
                 message=(
-                    "Une opération sur fichier "
-                    "a été détectée mais aucun "
-                    "chemin de fichier explicite "
-                    "n'a été trouvé."
+                    "Une opération sur fichier a été "
+                    "détectée mais aucun chemin "
+                    "explicite n'a été trouvé."
                 ),
-                error=(
-                    "explicit_file_path_missing"
-                ),
-                data={
-                    "worker": self.name,
-                    "operation": operation,
-                },
+                error="explicit_file_path_missing",
             )
 
         read_results = []
-
         generated_writes = []
-
         write_results = []
 
         created_files = []
-
         modified_files = []
-
         approval_required_files = []
-
         errors = []
 
-        # ====================================================
-        # EACH TARGET
-        # ====================================================
-
-        for target_path in (
-            requested_paths
-        ):
+        for target_path in requested_paths:
 
             current_content = ""
-
-            # ------------------------------------------------
-            # MODIFY => MUST READ EXISTING FILE
-            # ------------------------------------------------
 
             if operation == "modify":
 
@@ -965,9 +782,7 @@ Produis un rapport technique clair en français.
                     read_result
                 )
 
-                if read_result.get(
-                    "error"
-                ):
+                if read_result.get("error"):
 
                     return WorkerResult(
                         success=False,
@@ -979,16 +794,6 @@ Produis un rapport technique clair en français.
                             f"{target_path}: "
                             f"{read_result.get('error')}"
                         ),
-                        data={
-                            "worker": self.name,
-                            "operation": operation,
-                            "requested_paths": (
-                                requested_paths
-                            ),
-                            "files_read": (
-                                read_results
-                            ),
-                        },
                     )
 
                 current_content = str(
@@ -1006,39 +811,21 @@ Produis un rapport technique clair en français.
                             "Le fichier à modifier "
                             "est vide ou illisible."
                         ),
-                        error=(
-                            "empty_target_file"
-                        ),
+                        error="empty_target_file",
                     )
-
-            # ------------------------------------------------
-            # GENERATE RAW CONTENT
-            # ------------------------------------------------
 
             try:
 
                 generated_content = (
                     self._generate_file_content(
                         operation=operation,
-                        target_path=(
-                            target_path
-                        ),
+                        target_path=target_path,
                         title=title,
-                        description=(
-                            description
-                        ),
-                        original_message=(
-                            original_message
-                        ),
-                        current_content=(
-                            current_content
-                        ),
-                        dependency_context=(
-                            dependency_context
-                        ),
-                        project_tree=(
-                            project_tree
-                        ),
+                        description=description,
+                        original_message=original_message,
+                        current_content=current_content,
+                        dependency_context=dependency_context,
+                        project_tree=project_tree,
                     )
                 )
 
@@ -1050,9 +837,7 @@ Produis un rapport technique clair en français.
                         "Le Developer ne peut "
                         "pas contacter le modèle."
                     ),
-                    error=str(
-                        exc
-                    ),
+                    error=str(exc),
                 )
 
             except Exception as exc:
@@ -1063,9 +848,7 @@ Produis un rapport technique clair en français.
                         "Erreur pendant la génération "
                         "du fichier."
                     ),
-                    error=str(
-                        exc
-                    ),
+                    error=str(exc),
                 )
 
             if not generated_content:
@@ -1074,40 +857,25 @@ Produis un rapport technique clair en français.
                     success=False,
                     message=(
                         "Le modèle n'a généré "
-                        "aucun contenu pour "
-                        f"{target_path}."
+                        "aucun contenu."
                     ),
-                    error=(
-                        "generated_file_content_empty"
-                    ),
+                    error="generated_file_content_empty",
                 )
 
             generated_writes.append(
                 {
-                    "path": (
-                        target_path
-                    ),
-                    "content": (
-                        generated_content
-                    ),
+                    "path": target_path,
+                    "content": generated_content,
                 }
             )
-
-            # ------------------------------------------------
-            # REAL TOOL
-            # ------------------------------------------------
 
             try:
 
                 write_result = (
                     self.project_tool
                     .write_file(
-                        relative_path=(
-                            target_path
-                        ),
-                        content=(
-                            generated_content
-                        ),
+                        relative_path=target_path,
+                        content=generated_content,
                     )
                 )
 
@@ -1115,73 +883,39 @@ Produis un rapport technique clair en français.
                     write_result.to_dict()
                 )
 
-                write_results.append(
-                    serialized
-                )
-
             except Exception as exc:
 
                 serialized = {
-                    "path": (
-                        target_path
-                    ),
-                    "error": str(
-                        exc
-                    ),
+                    "path": target_path,
+                    "error": str(exc),
                 }
 
-                write_results.append(
-                    serialized
-                )
+            write_results.append(
+                serialized
+            )
 
-            # ------------------------------------------------
-            # CLASSIFY
-            # ------------------------------------------------
+            if serialized.get("created"):
+                created_files.append(target_path)
 
-            if serialized.get(
-                "created"
-            ):
-
-                created_files.append(
-                    target_path
-                )
-
-            if serialized.get(
-                "modified"
-            ):
-
-                modified_files.append(
-                    target_path
-                )
+            if serialized.get("modified"):
+                modified_files.append(target_path)
 
             if serialized.get(
                 "approval_required"
             ):
-
                 approval_required_files.append(
                     target_path
                 )
 
-            if serialized.get(
-                "error"
-            ):
-
-                errors.append(
-                    serialized
-                )
-
-        # ====================================================
-        # VALIDATE CREATE
-        # ====================================================
+            if serialized.get("error"):
+                errors.append(serialized)
 
         if operation == "create":
 
             missing = [
                 path
-                for path
-                in requested_paths
-                if path
-                not in created_files
+                for path in requested_paths
+                if path not in created_files
             ]
 
             if missing:
@@ -1194,28 +928,16 @@ Produis un rapport technique clair en français.
                     ),
                     error=(
                         "missing_created_files: "
-                        + ", ".join(
-                            missing
-                        )
+                        + ", ".join(missing)
                     ),
                     data={
                         "worker": self.name,
                         "operation": operation,
-                        "requested_paths": (
-                            requested_paths
-                        ),
-                        "writes": (
-                            write_results
-                        ),
-                        "proposed_writes": (
-                            generated_writes
-                        ),
+                        "requested_paths": requested_paths,
+                        "writes": write_results,
+                        "proposed_writes": generated_writes,
                     },
                 )
-
-        # ====================================================
-        # VALIDATE MODIFY
-        # ====================================================
 
         if operation == "modify":
 
@@ -1226,10 +948,8 @@ Produis un rapport technique clair en français.
 
             missing = [
                 path
-                for path
-                in requested_paths
-                if path
-                not in handled
+                for path in requested_paths
+                if path not in handled
             ]
 
             if missing:
@@ -1237,38 +957,22 @@ Produis un rapport technique clair en français.
                 return WorkerResult(
                     success=False,
                     message=(
-                        "La modification a bien été "
-                        "préparée mais le Permission "
-                        "Engine n'a retourné ni "
-                        "modification ni approbation."
+                        "La modification n'a été "
+                        "ni exécutée ni soumise "
+                        "à approbation."
                     ),
                     error=(
                         "modification_not_handled: "
-                        + ", ".join(
-                            missing
-                        )
+                        + ", ".join(missing)
                     ),
                     data={
                         "worker": self.name,
                         "operation": operation,
-                        "requested_paths": (
-                            requested_paths
-                        ),
-                        "files_read": (
-                            read_results
-                        ),
-                        "writes": (
-                            write_results
-                        ),
-                        "proposed_writes": (
-                            generated_writes
-                        ),
+                        "requested_paths": requested_paths,
+                        "writes": write_results,
+                        "proposed_writes": generated_writes,
                     },
                 )
-
-        # ====================================================
-        # REPORT
-        # ====================================================
 
         sections = [
             (
@@ -1309,7 +1013,8 @@ Produis un rapport technique clair en français.
 
             sections.append(
                 (
-                    "Autorisation utilisateur requise :\n- "
+                    "Autorisation utilisateur "
+                    "requise :\n- "
                     + "\n- ".join(
                         approval_required_files
                     )
@@ -1326,57 +1031,35 @@ Produis un rapport technique clair en français.
                             f"- {item.get('path')} : "
                             f"{item.get('error')}"
                         )
-                        for item
-                        in errors
+                        for item in errors
                     )
                 )
             )
 
         return WorkerResult(
             success=True,
-            message=(
-                "\n\n".join(
-                    sections
-                )
+            message="\n\n".join(
+                sections
             ),
             data={
                 "worker": self.name,
                 "type": "development",
-                "task_id": task.get(
-                    "id"
-                ),
+                "task_id": task.get("id"),
                 "model": self.llm.model,
-                "operation": (
-                    operation
-                ),
-                "requested_paths": (
-                    requested_paths
-                ),
+                "operation": operation,
+                "requested_paths": requested_paths,
                 "files_requested": (
                     requested_paths
-                    if operation
-                    == "modify"
+                    if operation == "modify"
                     else []
                 ),
-                "files_read": (
-                    read_results
-                ),
-                "writes": (
-                    write_results
-                ),
-                "created_files": (
-                    created_files
-                ),
-                "modified_files": (
-                    modified_files
-                ),
+                "files_read": read_results,
+                "writes": write_results,
+                "created_files": created_files,
+                "modified_files": modified_files,
                 "approval_required_files": (
                     approval_required_files
                 ),
-
-                # IMPORTANT :
-                # le contenu proposé est conservé
-                # pour notre futur système approve/reject.
                 "proposed_writes": (
                     generated_writes
                 ),
@@ -1389,10 +1072,7 @@ Produis un rapport technique clair en français.
 
     def execute(
         self,
-        task: Dict[
-            str,
-            Any,
-        ],
+        task: Dict[str, Any],
     ) -> WorkerResult:
 
         title = str(
@@ -1418,7 +1098,6 @@ Produis un rapport technique clair en français.
             metadata,
             dict,
         ):
-
             metadata = {}
 
         original_message = str(
@@ -1460,10 +1139,6 @@ Produis un rapport technique clair en français.
             )
         )
 
-        # ====================================================
-        # PROJECT TREE
-        # ====================================================
-
         try:
 
             project_tree = (
@@ -1482,9 +1157,7 @@ Produis un rapport technique clair en français.
                     "Impossible de lire "
                     "l'arborescence du projet."
                 ),
-                error=str(
-                    exc
-                ),
+                error=str(exc),
             )
 
         project_tree = (
@@ -1493,10 +1166,6 @@ Produis un rapport technique clair en français.
                 full_request,
             )
         )
-
-        # ====================================================
-        # FILE OPERATION
-        # ====================================================
 
         if operation in {
             "create",
@@ -1507,43 +1176,21 @@ Produis un rapport technique clair en français.
                 self._execute_file_operation(
                     task=task,
                     title=title,
-                    description=(
-                        description
-                    ),
-                    original_message=(
-                        original_message
-                    ),
-                    operation=(
-                        operation
-                    ),
-                    requested_paths=(
-                        requested_paths
-                    ),
-                    dependency_context=(
-                        dependency_context
-                    ),
-                    project_tree=(
-                        project_tree
-                    ),
+                    description=description,
+                    original_message=original_message,
+                    operation=operation,
+                    requested_paths=requested_paths,
+                    dependency_context=dependency_context,
+                    project_tree=project_tree,
                 )
             )
-
-        # ====================================================
-        # ANALYSIS
-        # ====================================================
 
         return (
             self._execute_analysis(
                 task=task,
                 title=title,
-                description=(
-                    description
-                ),
-                dependency_context=(
-                    dependency_context
-                ),
-                project_tree=(
-                    project_tree
-                ),
+                description=description,
+                dependency_context=dependency_context,
+                project_tree=project_tree,
             )
         )

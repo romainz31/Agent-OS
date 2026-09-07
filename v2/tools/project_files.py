@@ -1,24 +1,34 @@
 """
-Outils fichiers Agent-OS V2.3.1.
+Outils fichiers Agent-OS V2.3.5.
 
-Permet aux workers de :
-- voir l'arborescence du projet ;
-- lire des fichiers texte ;
-- créer de nouveaux fichiers ;
-- détecter qu'une modification nécessite une approbation.
+Permet :
+- lecture du projet ;
+- lecture de fichiers ;
+- création de nouveaux fichiers ;
+- détection des modifications nécessitant approbation ;
+- exécution d'une modification déjà approuvée.
 
 IMPORTANT :
-Les permissions sont contrôlées ici,
-hors du LLM.
+Les permissions sont contrôlées hors du LLM.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from dataclasses import (
+    dataclass,
+)
 
-from v2.config import BASE_DIR
+from pathlib import (
+    Path,
+)
+
+from typing import (
+    Any,
+)
+
+from v2.config import (
+    BASE_DIR,
+)
 
 from v2.permissions.permissions import (
     PermissionEngine,
@@ -31,16 +41,17 @@ from v2.permissions.permissions import (
 # ============================================================
 
 
-class ProjectToolError(Exception):
+class ProjectToolError(
+    Exception
+):
     """
-    Erreur générique d'un outil projet.
+    Erreur outil projet.
     """
 
 
-class ProjectPermissionError(ProjectToolError):
-    """
-    Permission refusée ou approbation nécessaire.
-    """
+class ProjectPermissionError(
+    ProjectToolError
+):
 
     def __init__(
         self,
@@ -49,12 +60,24 @@ class ProjectPermissionError(ProjectToolError):
         reason: str,
     ) -> None:
 
-        self.action = action
-        self.result = result
-        self.reason = reason
+        self.action = (
+            action
+        )
+
+        self.result = (
+            result
+        )
+
+        self.reason = (
+            reason
+        )
 
         super().__init__(
-            f"{action}: {result.value} - {reason}"
+            (
+                f"{action}: "
+                f"{result.value} - "
+                f"{reason}"
+            )
         )
 
 
@@ -79,7 +102,9 @@ class FileReadResult:
         return {
             "path": self.path,
             "content": self.content,
-            "truncated": self.truncated,
+            "truncated": (
+                self.truncated
+            ),
         }
 
 
@@ -112,14 +137,11 @@ class FileWriteResult:
 
 
 # ============================================================
-# TOOL
+# PROJECT FILE TOOL
 # ============================================================
 
 
 class ProjectFilesTool:
-    """
-    Outils fichiers limités au répertoire Agent-OS.
-    """
 
     IGNORED_DIRECTORIES = {
         ".git",
@@ -136,7 +158,9 @@ class ProjectFilesTool:
         "data/v2/",
     )
 
-    DEFAULT_MAX_READ_CHARS = 30_000
+    DEFAULT_MAX_READ_CHARS = (
+        30_000
+    )
 
     def __init__(
         self,
@@ -144,7 +168,9 @@ class ProjectFilesTool:
         project_root: Path | None = None,
     ) -> None:
 
-        self.permissions = permissions
+        self.permissions = (
+            permissions
+        )
 
         self.project_root = (
             project_root
@@ -170,12 +196,17 @@ class ProjectFilesTool:
             permission.result
             == PermissionResult.ALLOWED
         ):
+
             return
 
         raise ProjectPermissionError(
             action=action,
-            result=permission.result,
-            reason=permission.reason,
+            result=(
+                permission.result
+            ),
+            reason=(
+                permission.reason
+            ),
         )
 
     # ========================================================
@@ -190,7 +221,10 @@ class ProjectFilesTool:
         relative_path = (
             relative_path
             .strip()
-            .replace("\\", "/")
+            .replace(
+                "\\",
+                "/",
+            )
         )
 
         if not relative_path:
@@ -213,7 +247,10 @@ class ProjectFilesTool:
         except ValueError as exc:
 
             raise ProjectToolError(
-                "Accès hors du projet interdit."
+                (
+                    "Accès hors du projet "
+                    "interdit."
+                )
             ) from exc
 
         return candidate
@@ -246,7 +283,9 @@ class ProjectFilesTool:
             "read_project"
         )
 
-        entries: list[str] = []
+        entries: list[
+            str
+        ] = []
 
         def walk(
             directory: Path,
@@ -257,6 +296,7 @@ class ProjectFilesTool:
                 depth
                 > max_depth
             ):
+
                 return
 
             try:
@@ -270,14 +310,18 @@ class ProjectFilesTool:
                 )
 
             except OSError:
+
                 return
 
             for child in children:
 
                 if (
-                    len(entries)
+                    len(
+                        entries
+                    )
                     >= max_entries
                 ):
+
                     return
 
                 relative = (
@@ -291,6 +335,7 @@ class ProjectFilesTool:
                     and child.name
                     in self.IGNORED_DIRECTORIES
                 ):
+
                     continue
 
                 if any(
@@ -300,6 +345,7 @@ class ProjectFilesTool:
                     for prefix
                     in self.IGNORED_PREFIXES
                 ):
+
                     continue
 
                 if child.is_dir():
@@ -372,34 +418,46 @@ class ProjectFilesTool:
         if not path.exists():
 
             raise ProjectToolError(
-                f"Fichier introuvable : "
-                f"{relative_path}"
+                (
+                    "Fichier introuvable : "
+                    f"{relative_path}"
+                )
             )
 
         if not path.is_file():
 
             raise ProjectToolError(
-                f"Ce chemin n'est pas "
-                f"un fichier : {relative_path}"
+                (
+                    "Ce chemin n'est pas "
+                    "un fichier : "
+                    f"{relative_path}"
+                )
             )
 
         try:
 
-            content = path.read_text(
-                encoding="utf-8"
+            content = (
+                path.read_text(
+                    encoding="utf-8"
+                )
             )
 
         except UnicodeDecodeError as exc:
 
             raise ProjectToolError(
-                "Le fichier n'est pas "
-                "un fichier texte UTF-8."
+                (
+                    "Le fichier n'est pas "
+                    "un fichier texte UTF-8."
+                )
             ) from exc
 
         except OSError as exc:
 
             raise ProjectToolError(
-                f"Lecture impossible : {exc}"
+                (
+                    "Lecture impossible : "
+                    f"{exc}"
+                )
             ) from exc
 
         limit = (
@@ -408,27 +466,36 @@ class ProjectFilesTool:
         )
 
         truncated = (
-            len(content)
+            len(
+                content
+            )
             > limit
         )
 
         if truncated:
 
             content = (
-                content[:limit]
-                + "\n\n[CONTENU TRONQUÉ]"
+                content[
+                    :limit
+                ]
+                + (
+                    "\n\n"
+                    "[CONTENU TRONQUÉ]"
+                )
             )
 
         return FileReadResult(
-            path=self._relative(
-                path
+            path=(
+                self._relative(
+                    path
+                )
             ),
             content=content,
             truncated=truncated,
         )
 
     # ========================================================
-    # WRITE
+    # NORMAL WRITE
     # ========================================================
 
     def write_file(
@@ -463,7 +530,8 @@ class ProjectFilesTool:
 
             if (
                 permission.result
-                == PermissionResult.APPROVAL_REQUIRED
+                == PermissionResult
+                .APPROVAL_REQUIRED
             ):
 
                 return FileWriteResult(
@@ -481,9 +549,15 @@ class ProjectFilesTool:
             ):
 
                 raise ProjectPermissionError(
-                    action="modify_code",
-                    result=permission.result,
-                    reason=permission.reason,
+                    action=(
+                        "modify_code"
+                    ),
+                    result=(
+                        permission.result
+                    ),
+                    reason=(
+                        permission.reason
+                    ),
                 )
 
             try:
@@ -496,7 +570,10 @@ class ProjectFilesTool:
             except OSError as exc:
 
                 raise ProjectToolError(
-                    f"Écriture impossible : {exc}"
+                    (
+                        "Écriture impossible : "
+                        f"{exc}"
+                    )
                 ) from exc
 
             return FileWriteResult(
@@ -530,7 +607,10 @@ class ProjectFilesTool:
         except OSError as exc:
 
             raise ProjectToolError(
-                f"Création impossible : {exc}"
+                (
+                    "Création impossible : "
+                    f"{exc}"
+                )
             ) from exc
 
         return FileWriteResult(
@@ -538,5 +618,95 @@ class ProjectFilesTool:
             created=True,
             message=(
                 "Nouveau fichier créé."
+            ),
+        )
+
+    # ========================================================
+    # APPROVED WRITE
+    # ========================================================
+
+    def apply_approved_write(
+        self,
+        relative_path: str,
+        content: str,
+    ) -> FileWriteResult:
+        """
+        Exécute une modification déjà explicitement
+        approuvée par l'utilisateur.
+
+        Cette méthode ne doit jamais être utilisée
+        directement par un LLM ou un Worker.
+
+        Elle est réservée à ApprovalManager.
+        """
+
+        path = (
+            self._resolve_path(
+                relative_path
+            )
+        )
+
+        relative = (
+            self._relative(
+                path
+            )
+        )
+
+        # Une approbation de modification
+        # ne permet pas de créer silencieusement
+        # un nouveau fichier.
+        if not path.exists():
+
+            raise ProjectToolError(
+                (
+                    "Impossible d'appliquer "
+                    "l'approbation : "
+                    "le fichier n'existe plus : "
+                    f"{relative}"
+                )
+            )
+
+        if not path.is_file():
+
+            raise ProjectToolError(
+                (
+                    "La cible approuvée "
+                    "n'est pas un fichier : "
+                    f"{relative}"
+                )
+            )
+
+        if not isinstance(
+            content,
+            str,
+        ):
+
+            raise ProjectToolError(
+                "Contenu approuvé invalide."
+            )
+
+        try:
+
+            path.write_text(
+                content,
+                encoding="utf-8",
+            )
+
+        except OSError as exc:
+
+            raise ProjectToolError(
+                (
+                    "Écriture approuvée impossible : "
+                    f"{exc}"
+                )
+            ) from exc
+
+        return FileWriteResult(
+            path=relative,
+            modified=True,
+            approval_required=False,
+            message=(
+                "Modification approuvée "
+                "et exécutée."
             ),
         )

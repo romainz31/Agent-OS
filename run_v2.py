@@ -1,15 +1,30 @@
 """
-Point d'entrée Agent-OS V2.3.1.
+Point d'entrée Agent-OS V2.3.6.
 
 Commandes :
 - status
 - tasks
 - missions
+- approvals
+- oui
+- non
 - quit
 """
 
 from v2.manager.manager import (
     Manager,
+)
+
+from v2.approvals.approval_manager import (
+    ApprovalManager,
+)
+
+from v2.tools.project_files import (
+    ProjectFilesTool,
+)
+
+from v2.tools.python_runner import (
+    PythonRunner,
 )
 
 from v2.workers.llm_worker import (
@@ -73,6 +88,11 @@ class DemoWorker(
         )
 
 
+# ============================================================
+# NOTIFICATIONS
+# ============================================================
+
+
 def show_notifications(
     manager: Manager,
 ) -> None:
@@ -87,6 +107,37 @@ def show_notifications(
         )
 
 
+# ============================================================
+# APPROVAL REQUEST
+# ============================================================
+
+
+def show_pending_approval(
+    approvals: ApprovalManager,
+) -> None:
+
+    request = (
+        approvals
+        .format_latest_request()
+    )
+
+    if request:
+
+        print()
+
+        print(
+            "[MANAGER] "
+            + request
+        )
+
+        print()
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+
 def main() -> None:
 
     print(
@@ -94,7 +145,7 @@ def main() -> None:
     )
 
     print(
-        "AGENT-OS V2.3.1 — MANAGER"
+        "AGENT-OS V2.3.6 — MANAGER"
     )
 
     print(
@@ -105,6 +156,26 @@ def main() -> None:
 
     manager = (
         Manager()
+    )
+
+    # ========================================================
+    # SHARED TOOLS
+    # ========================================================
+
+    project_tool = (
+        ProjectFilesTool(
+            permissions=(
+                manager.permissions
+            )
+        )
+    )
+
+    python_runner = (
+        PythonRunner(
+            permissions=(
+                manager.permissions
+            )
+        )
     )
 
     # ========================================================
@@ -143,12 +214,46 @@ def main() -> None:
         DeveloperWorker(
             permissions=(
                 manager.permissions
-            )
+            ),
+            project_tool=(
+                project_tool
+            ),
         )
     )
 
     manager.register_worker(
-        TesterWorker()
+        TesterWorker(
+            permissions=(
+                manager.permissions
+            ),
+            project_tool=(
+                project_tool
+            ),
+            python_runner=(
+                python_runner
+            ),
+        )
+    )
+
+    # ========================================================
+    # APPROVAL MANAGER
+    # ========================================================
+
+    approvals = (
+        ApprovalManager(
+            task_manager=(
+                manager.tasks
+            ),
+            event_bus=(
+                manager.event_bus
+            ),
+            worker_engine=(
+                manager.worker_engine
+            ),
+            project_tool=(
+                project_tool
+            ),
+        )
     )
 
     # ========================================================
@@ -166,10 +271,15 @@ def main() -> None:
 
     print(
         "Commandes : "
-        "status | tasks | missions | quit"
+        "status | tasks | missions | "
+        "approvals | oui | non | quit"
     )
 
     print()
+
+    last_shown_approval_id = (
+        None
+    )
 
     try:
 
@@ -178,6 +288,25 @@ def main() -> None:
             show_notifications(
                 manager
             )
+
+            pending_task = (
+                approvals.latest_pending()
+            )
+
+            if (
+                pending_task
+                is not None
+                and pending_task.id
+                != last_shown_approval_id
+            ):
+
+                show_pending_approval(
+                    approvals
+                )
+
+                last_shown_approval_id = (
+                    pending_task.id
+                )
 
             try:
 
@@ -195,6 +324,10 @@ def main() -> None:
                 .lower()
             )
 
+            # =================================================
+            # QUIT
+            # =================================================
+
             if (
                 command
                 == "quit"
@@ -203,7 +336,92 @@ def main() -> None:
                 break
 
             if not command:
+
                 continue
+
+            # =================================================
+            # APPROVE
+            # =================================================
+
+            if command in {
+                "oui",
+                "yes",
+                "y",
+                "approve",
+                "autorise",
+                "autoriser",
+            }:
+
+                response = (
+                    approvals
+                    .approve_latest()
+                )
+
+                print()
+
+                print(
+                    "MANAGER >"
+                )
+
+                print(
+                    response
+                )
+
+                print()
+
+                last_shown_approval_id = (
+                    None
+                )
+
+                show_notifications(
+                    manager
+                )
+
+                continue
+
+            # =================================================
+            # REJECT
+            # =================================================
+
+            if command in {
+                "non",
+                "no",
+                "n",
+                "reject",
+                "refuse",
+                "refuser",
+            }:
+
+                response = (
+                    approvals
+                    .reject_latest()
+                )
+
+                print()
+
+                print(
+                    "MANAGER >"
+                )
+
+                print(
+                    response
+                )
+
+                print()
+
+                last_shown_approval_id = (
+                    None
+                )
+
+                show_notifications(
+                    manager
+                )
+
+                continue
+
+            # =================================================
+            # STATUS
+            # =================================================
 
             if (
                 command
@@ -220,6 +438,10 @@ def main() -> None:
 
                 continue
 
+            # =================================================
+            # TASKS
+            # =================================================
+
             if (
                 command
                 == "tasks"
@@ -235,6 +457,10 @@ def main() -> None:
 
                 continue
 
+            # =================================================
+            # MISSIONS
+            # =================================================
+
             if (
                 command
                 == "missions"
@@ -249,6 +475,30 @@ def main() -> None:
                 print()
 
                 continue
+
+            # =================================================
+            # APPROVALS
+            # =================================================
+
+            if (
+                command
+                == "approvals"
+            ):
+
+                print()
+
+                print(
+                    approvals
+                    .format_pending()
+                )
+
+                print()
+
+                continue
+
+            # =================================================
+            # NORMAL CHAT
+            # =================================================
 
             response = (
                 manager.chat(

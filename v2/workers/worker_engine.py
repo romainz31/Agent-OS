@@ -1,13 +1,13 @@
 """
-Worker Engine Agent-OS V2.3.3.
+Worker Engine Agent-OS V2.3.5.
 
 Responsabilités :
 - exécuter les workers en parallèle ;
-- attendre les dépendances ;
+- gérer les dépendances ;
 - transmettre les résultats précédents ;
-- réveiller les tâches dépendantes ;
 - détecter les demandes d'approbation ;
-- placer une tâche en waiting_approval.
+- placer les tâches concernées en waiting_approval ;
+- reprendre les dépendances après résolution humaine.
 """
 
 from __future__ import annotations
@@ -51,7 +51,9 @@ class WorkerEngine:
 
         self.executor = (
             ThreadPoolExecutor(
-                max_workers=max_workers,
+                max_workers=(
+                    max_workers
+                ),
                 thread_name_prefix=(
                     "agent-worker"
                 ),
@@ -112,7 +114,9 @@ class WorkerEngine:
         if (
             task.status
             not in {
-                TaskStatus.PENDING.value,
+                TaskStatus
+                .PENDING
+                .value,
                 TaskStatus
                 .WAITING_DEPENDENCY
                 .value,
@@ -168,7 +172,9 @@ class WorkerEngine:
             self.event_bus.publish(
                 "task.failed",
                 {
-                    "task_id": task_id,
+                    "task_id": (
+                        task_id
+                    ),
                     "error": (
                         dependency_failure
                     ),
@@ -191,7 +197,9 @@ class WorkerEngine:
             self.event_bus.publish(
                 "task.waiting_dependency",
                 {
-                    "task_id": task_id,
+                    "task_id": (
+                        task_id
+                    ),
                     "depends_on": list(
                         task.depends_on
                     ),
@@ -218,8 +226,12 @@ class WorkerEngine:
         self.event_bus.publish(
             "task.started",
             {
-                "task_id": task_id,
-                "worker": worker.name,
+                "task_id": (
+                    task_id
+                ),
+                "worker": (
+                    worker.name
+                ),
             },
         )
 
@@ -246,7 +258,7 @@ class WorkerEngine:
         return True
 
     # ========================================================
-    # EXECUTION
+    # EXECUTE
     # ========================================================
 
     def _execute(
@@ -268,7 +280,9 @@ class WorkerEngine:
                 message=(
                     "Tâche introuvable."
                 ),
-                error="task_not_found",
+                error=(
+                    "task_not_found"
+                ),
             )
 
         payload = (
@@ -284,7 +298,9 @@ class WorkerEngine:
 
         payload[
             "dependency_context"
-        ] = dependency_context
+        ] = (
+            dependency_context
+        )
 
         metadata = dict(
             payload.get(
@@ -296,7 +312,9 @@ class WorkerEngine:
 
         metadata[
             "dependency_context"
-        ] = dependency_context
+        ] = (
+            dependency_context
+        )
 
         payload[
             "metadata"
@@ -342,7 +360,7 @@ class WorkerEngine:
             )
 
     # ========================================================
-    # RESULT CLASSIFICATION
+    # APPROVAL DETECTION
     # ========================================================
 
     @staticmethod
@@ -402,7 +420,9 @@ class WorkerEngine:
             self.event_bus.publish(
                 "task.failed",
                 {
-                    "task_id": task_id,
+                    "task_id": (
+                        task_id
+                    ),
                     "error": str(
                         exc
                     ),
@@ -422,11 +442,13 @@ class WorkerEngine:
         if result.success:
 
             # ------------------------------------------------
-            # APPROVAL REQUIRED
+            # WAITING APPROVAL
             # ------------------------------------------------
 
-            if self._requires_approval(
-                result
+            if (
+                self._requires_approval(
+                    result
+                )
             ):
 
                 self.task_manager.update(
@@ -449,7 +471,9 @@ class WorkerEngine:
                 self.event_bus.publish(
                     "task.waiting_approval",
                     {
-                        "task_id": task_id,
+                        "task_id": (
+                            task_id
+                        ),
                         "message": (
                             result.message
                         ),
@@ -463,7 +487,7 @@ class WorkerEngine:
                 return
 
             # ------------------------------------------------
-            # NORMAL COMPLETION
+            # COMPLETED
             # ------------------------------------------------
 
             self.task_manager.complete(
@@ -475,7 +499,9 @@ class WorkerEngine:
             self.event_bus.publish(
                 "task.completed",
                 {
-                    "task_id": task_id,
+                    "task_id": (
+                        task_id
+                    ),
                     "message": (
                         result.message
                     ),
@@ -509,8 +535,12 @@ class WorkerEngine:
         self.event_bus.publish(
             "task.failed",
             {
-                "task_id": task_id,
-                "error": error,
+                "task_id": (
+                    task_id
+                ),
+                "error": (
+                    error
+                ),
             },
         )
 
@@ -537,7 +567,9 @@ class WorkerEngine:
             if (
                 dependent.status
                 not in {
-                    TaskStatus.PENDING.value,
+                    TaskStatus
+                    .PENDING
+                    .value,
                     TaskStatus
                     .WAITING_DEPENDENCY
                     .value,
@@ -566,7 +598,9 @@ class WorkerEngine:
                         "task_id": (
                             dependent.id
                         ),
-                        "error": failure,
+                        "error": (
+                            failure
+                        ),
                     },
                 )
 
@@ -582,6 +616,19 @@ class WorkerEngine:
                 self.submit(
                     dependent.id
                 )
+
+    def resume_dependents(
+        self,
+        task_id: str,
+    ) -> None:
+        """
+        API publique utilisée notamment après
+        résolution d'une approbation humaine.
+        """
+
+        self._resume_dependents(
+            task_id
+        )
 
     # ========================================================
     # CONTROL

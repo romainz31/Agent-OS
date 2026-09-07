@@ -1,10 +1,13 @@
 """
-Permission Engine de Agent-OS V2.
+Permission Engine de Agent-OS V2.3.6.
 
 Le modèle peut demander une action.
 
-Il ne peut pas décider lui-même
+Il ne peut jamais décider lui-même
 si cette action est autorisée.
+
+Les permissions sont vérifiées
+par du code Python hors du LLM.
 """
 
 from __future__ import annotations
@@ -86,6 +89,21 @@ class PermissionEngine:
                 reason=(
                     "Lecture du projet "
                     "autorisée."
+                ),
+            ),
+
+            # ==============================================
+            # TESTS
+            # ==============================================
+
+            "run_tests": Permission(
+                action="run_tests",
+                result=(
+                    PermissionResult.ALLOWED
+                ),
+                reason=(
+                    "Tests Python contrôlés "
+                    "autorisés via PythonRunner."
                 ),
             ),
 
@@ -247,9 +265,6 @@ class PermissionEngine:
         self,
         action: str,
     ) -> Permission:
-        """
-        Vérifie une permission.
-        """
 
         permission = (
             self._rules.get(
