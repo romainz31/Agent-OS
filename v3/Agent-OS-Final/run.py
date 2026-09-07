@@ -48,7 +48,7 @@ def main() -> None:
     )
 
     print(
-        "AGENT-OS V3.3 — MANAGER"
+        "AGENT-OS V3.4 — MANAGER"
     )
 
     print(

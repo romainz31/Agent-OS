@@ -16,19 +16,13 @@ from agentos.llm import (
 
 @dataclass
 class PlanStep:
-
     title: str
     description: str
     worker: str
     depends_on: list[int]
 
-    def to_dict(
-        self,
-    ):
-
-        return asdict(
-            self
-        )
+    def to_dict(self):
+        return asdict(self)
 
 
 class Planner:
@@ -40,11 +34,18 @@ class Planner:
         "ai_worker",
     }
 
+    # Extension obligatoirement commencée par une lettre.
+    #
+    # hello.py       -> OUI
+    # config.json    -> OUI
+    # dashboard.yaml -> OUI
+    # V3.4           -> NON
+    # 1.25           -> NON
     FILE_RE = re.compile(
         r"(?:(?:workspace/)?"
         r"(?:[A-Za-z0-9_.-]+/)*"
-        r"[A-Za-z0-9_.-]+\."
-        r"[A-Za-z0-9_-]+)"
+        r"[A-Za-z0-9_.-]+"
+        r"\.[A-Za-z][A-Za-z0-9_-]*)"
     )
 
     def __init__(
@@ -65,9 +66,7 @@ class Planner:
 
         text = raw.strip()
 
-        if text.startswith(
-            "```"
-        ):
+        if text.startswith("```"):
 
             first_newline = (
                 text.find("\n")
@@ -80,14 +79,12 @@ class Planner:
                 ]
 
             if (
-                text
-                .rstrip()
+                text.rstrip()
                 .endswith("```")
             ):
 
                 text = (
-                    text
-                    .rstrip()[:-3]
+                    text.rstrip()[:-3]
                 )
 
         return text.strip()
@@ -141,16 +138,14 @@ class Planner:
     ) -> list[PlanStep] | None:
 
         """
-        Cas déterministe :
+        Cas simple et déterministe :
 
-        Si l'utilisateur demande directement à Developer
-        de travailler sur UN fichier explicitement nommé,
-        inutile de laisser le LLM inventer 2 Developers,
-        un Researcher ou plusieurs Testers.
-
-        Pipeline imposé :
+        Une demande Developer portant sur exactement
+        un fichier explicite donne :
 
         Developer -> Tester
+
+        Le LLM ne décide pas du workflow.
         """
 
         if (
@@ -160,8 +155,10 @@ class Planner:
 
             return None
 
-        files = self._explicit_files(
-            message
+        files = (
+            self._explicit_files(
+                message
+            )
         )
 
         if len(files) != 1:
@@ -184,14 +181,13 @@ class Planner:
                     f"Vérifier {target}"
                 ),
                 description=(
-                    "Tester réellement le fichier "
-                    f"{target} après la modification "
+                    "Tester réellement "
+                    f"le fichier {target} "
+                    "après la modification "
                     "demandée par l'utilisateur."
                 ),
                 worker="tester",
-                depends_on=[
-                    0
-                ],
+                depends_on=[0],
             ),
         ]
 
@@ -213,9 +209,7 @@ class Planner:
                 "Le plan doit être une liste."
             )
 
-        steps: list[
-            PlanStep
-        ] = []
+        steps: list[PlanStep] = []
 
         for item in raw_steps:
 
@@ -325,7 +319,7 @@ class Planner:
         return steps
 
     # =========================================================
-    # REMOVE USELESS RESEARCH
+    # REMOVE USELESS LOCAL RESEARCH
     # =========================================================
 
     def _remove_useless_local_research(
@@ -341,8 +335,7 @@ class Planner:
             return steps
 
         if not any(
-            step.worker
-            == "developer"
+            step.worker == "developer"
             for step
             in steps
         ):
@@ -408,9 +401,7 @@ class Planner:
 
             old_to_new[
                 old_index
-            ] = len(
-                result
-            )
+            ] = len(result)
 
             result.append(
                 PlanStep(
@@ -586,9 +577,7 @@ class Planner:
                         "par le Developer."
                     ),
                     worker="tester",
-                    depends_on=[
-                        0
-                    ],
+                    depends_on=[0],
                 ),
             ]
 
@@ -616,9 +605,7 @@ class Planner:
                         "une synthèse exploitable."
                     ),
                     worker="ai_worker",
-                    depends_on=[
-                        0
-                    ],
+                    depends_on=[0],
                 ),
             ]
 
@@ -660,9 +647,9 @@ class Planner:
         initial_worker: str,
     ) -> list[PlanStep]:
 
-        # =====================================================
-        # DETERMINISTIC SIMPLE CASE
-        # =====================================================
+        # -----------------------------------------------------
+        # SIMPLE CASE
+        # -----------------------------------------------------
 
         simple = (
             self._simple_local_development(
@@ -677,82 +664,57 @@ class Planner:
 
             return simple
 
-        # =====================================================
-        # COMPLEX CASE -> LLM PLANNER
-        # =====================================================
+        # -----------------------------------------------------
+        # COMPLEX CASE
+        # -----------------------------------------------------
 
         prompt = f"""
 Tu es le Planner d'Agent-OS.
 
-Ton travail est UNIQUEMENT de découper une mission
-en tâches concrètes pour les workers.
+Ta responsabilité est uniquement de découper
+une mission complexe en tâches utiles.
 
-DEMANDE UTILISATEUR :
+DEMANDE :
 
 {message}
 
-WORKER INITIAL SUGGÉRÉ :
+WORKER INITIAL :
 
 {initial_worker}
 
-WORKERS DISPONIBLES :
+WORKERS :
 
 researcher
-- recherche réellement des informations sur Internet.
-- ne sert pas à trouver des fichiers locaux déjà nommés.
+- recherche Internet réelle.
 
 developer
-- lit, crée et modifie les fichiers du workspace.
-- une opération sur un fichier doit si possible
-  être réalisée en UNE seule tâche Developer.
+- lit, crée et modifie des fichiers locaux.
+- sait lire lui-même les fichiers qu'il modifie.
 
 tester
-- teste réellement le travail du Developer.
+- vérifie réellement le résultat.
 
 ai_worker
-- analyse, réfléchit, rédige et synthétise.
+- analyse et synthétise.
 
 RÈGLES :
 
 1. Utilise uniquement ces workers.
+2. Maximum 8 étapes.
+3. Ne crée pas plusieurs Developers pour une
+   seule modification simple.
+4. Lire puis modifier un même fichier est UNE tâche.
+5. Ne crée pas de Researcher pour localiser un fichier
+   dont le chemin est déjà fourni.
+6. Un Developer doit normalement être suivi d'un Tester.
+7. Les approbations utilisateur ne sont jamais une tâche.
+8. Retourne uniquement du JSON valide.
 
-2. Ne réalise jamais toi-même la mission.
-
-3. Crée uniquement les étapes nécessaires.
-
-4. Maximum 8 étapes.
-
-5. Une dépendance référence l'index
-   d'une étape précédente.
-
-6. La première étape a l'index 0.
-
-7. Ne découpe PAS artificiellement une modification
-   de fichier en plusieurs tâches Developer.
-
-8. "Lire le fichier" puis "modifier le fichier"
-   ne doivent PAS être deux tâches séparées.
-   Developer sait lire le fichier lui-même.
-
-9. Un Developer doit normalement être suivi
-   par un Tester.
-
-10. Si le chemin d'un fichier est fourni,
-    ne crée pas de Researcher pour le trouver.
-
-11. Researcher sert uniquement pour une vraie
-    recherche Internet ou documentaire.
-
-12. Ne crée jamais une tâche pour demander
-    l'autorisation utilisateur.
-
-13. Retourne uniquement du JSON valide.
-
-FORMAT EXACT :
+FORMAT :
 
 [
   {{
-    "title": "Titre court",
+    "title": "Titre",
     "description": "Travail exact",
     "worker": "developer",
     "depends_on": []
@@ -767,8 +729,7 @@ FORMAT EXACT :
                 system=(
                     "Tu es le Planner "
                     "d'Agent-OS. "
-                    "Retourne uniquement "
-                    "du JSON valide."
+                    "JSON uniquement."
                 ),
             )
 
@@ -778,8 +739,10 @@ FORMAT EXACT :
                 )
             )
 
-            parsed = json.loads(
-                cleaned
+            parsed = (
+                json.loads(
+                    cleaned
+                )
             )
 
             if isinstance(
@@ -787,11 +750,9 @@ FORMAT EXACT :
                 dict,
             ):
 
-                parsed = (
-                    parsed.get(
-                        "steps",
-                        [],
-                    )
+                parsed = parsed.get(
+                    "steps",
+                    [],
                 )
 
             steps = (
@@ -807,9 +768,11 @@ FORMAT EXACT :
             json.JSONDecodeError,
         ):
 
-            steps = self.fallback(
-                message,
-                initial_worker,
+            steps = (
+                self.fallback(
+                    message,
+                    initial_worker,
+                )
             )
 
         steps = (
@@ -819,10 +782,8 @@ FORMAT EXACT :
             )
         )
 
-        steps = (
+        return (
             self._ensure_workflow_rules(
                 steps
             )
         )
-
-        return steps

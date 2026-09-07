@@ -181,7 +181,7 @@ class Manager:
         )
 
         # =====================================================
-        # PLANNER
+        # PLANNER / ORCHESTRATOR
         # =====================================================
 
         self.planner = (
@@ -189,10 +189,6 @@ class Manager:
                 self.llm
             )
         )
-
-        # =====================================================
-        # ORCHESTRATOR
-        # =====================================================
 
         self.orchestrator = (
             Orchestrator(
@@ -204,7 +200,7 @@ class Manager:
         )
 
     # =========================================================
-    # RAW NOTIFICATION
+    # NOTIFICATION STORAGE
     # =========================================================
 
     def _append_notification(
@@ -227,8 +223,10 @@ class Manager:
         text: str,
     ):
 
-        match = self.TASK_ID_RE.search(
-            text
+        match = (
+            self.TASK_ID_RE.search(
+                text
+            )
         )
 
         if match is None:
@@ -240,7 +238,7 @@ class Manager:
         )
 
     # =========================================================
-    # HUMAN NOTIFICATION
+    # HUMAN EVENT
     # =========================================================
 
     def _humanize_task_event(
@@ -248,33 +246,40 @@ class Manager:
         text: str,
     ) -> str | None:
 
-        task = self._task_from_event(
-            text
+        task = (
+            self._task_from_event(
+                text
+            )
         )
 
         if task is None:
 
             return text
 
-        # -----------------------------------------------------
-        # APPROVAL REQUIRED
-        # -----------------------------------------------------
+        # =====================================================
+        # APPROVAL
+        # =====================================================
 
         if (
             "attend ton approbation"
             in text
         ):
 
-            files = (
-                task.result_data.get(
-                    "approval_required_files",
-                    [],
-                )
+            data = (
+                task.result_data
                 if isinstance(
                     task.result_data,
                     dict,
                 )
-                else []
+                else {}
+            )
+
+            files = (
+                data.get(
+                    "approval_required_files",
+                    [],
+                )
+                or []
             )
 
             if files:
@@ -294,14 +299,14 @@ class Manager:
                 )
 
             return (
-                "Une action est prête "
-                "et nécessite ton autorisation.\n\n"
+                "Une action nécessite "
+                "ton autorisation.\n\n"
                 "Tu valides ?"
             )
 
-        # -----------------------------------------------------
-        # FAILED
-        # -----------------------------------------------------
+        # =====================================================
+        # FAILURE
+        # =====================================================
 
         if text.startswith(
             "✗"
@@ -315,14 +320,14 @@ class Manager:
 
             return (
                 "Une étape de la mission "
-                "a échoué.\n\n"
+                "a rencontré un problème.\n\n"
                 f"Étape : {task.title}\n"
                 f"Détail : {detail}"
             )
 
-        # -----------------------------------------------------
-        # COMPLETED
-        # -----------------------------------------------------
+        # =====================================================
+        # SUCCESS
+        # =====================================================
 
         if text.startswith(
             "✓"
@@ -335,7 +340,7 @@ class Manager:
 
                 return (
                     "La recherche est terminée. "
-                    "Je poursuis avec l'étape suivante."
+                    "Je poursuis la mission."
                 )
 
             if (
@@ -344,9 +349,8 @@ class Manager:
             ):
 
                 return (
-                    "Le travail de développement "
-                    "est terminé. "
-                    "Je passe aux vérifications."
+                    "Le développement est terminé. "
+                    "Je lance les vérifications."
                 )
 
             if (
@@ -355,7 +359,8 @@ class Manager:
             ):
 
                 return (
-                    "Les vérifications sont terminées."
+                    "Les vérifications "
+                    "sont terminées."
                 )
 
             if (
@@ -364,13 +369,13 @@ class Manager:
             ):
 
                 return (
-                    "L'étape d'analyse est terminée."
+                    "L'analyse est terminée."
                 )
 
         return None
 
     # =========================================================
-    # MISSION LOOKUP
+    # MISSION FOR TASK
     # =========================================================
 
     def _mission_for_task(
@@ -500,57 +505,48 @@ class Manager:
 
         if modified_files:
 
-            lines.append(
-                ""
+            lines.extend(
+                [
+                    "",
+                    "Fichier(s) modifié(s) :",
+                ]
             )
 
-            lines.append(
-                "Fichier(s) modifié(s) :"
+            lines.extend(
+                f"- {path}"
+                for path
+                in modified_files
             )
-
-            for path in (
-                modified_files
-            ):
-
-                lines.append(
-                    f"- {path}"
-                )
 
         if created_files:
 
-            lines.append(
-                ""
+            lines.extend(
+                [
+                    "",
+                    "Fichier(s) créé(s) :",
+                ]
             )
 
-            lines.append(
-                "Fichier(s) créé(s) :"
+            lines.extend(
+                f"- {path}"
+                for path
+                in created_files
             )
-
-            for path in (
-                created_files
-            ):
-
-                lines.append(
-                    f"- {path}"
-                )
 
         if tested_files:
 
-            lines.append(
-                ""
+            lines.extend(
+                [
+                    "",
+                    "Vérification effectuée sur :",
+                ]
             )
 
-            lines.append(
-                "Vérification effectuée sur :"
+            lines.extend(
+                f"- {path}"
+                for path
+                in tested_files
             )
-
-            for path in (
-                tested_files
-            ):
-
-                lines.append(
-                    f"- {path}"
-                )
 
         return "\n".join(
             lines
@@ -589,28 +585,33 @@ class Manager:
         ] = current
 
         if (
-            previous == current
+            previous
+            == current
         ):
 
             return
 
-        # -----------------------------------------------------
-        # COMPLETED
-        # -----------------------------------------------------
-
         if current == "completed":
 
-            self._append_notification(
+            summary = (
                 self._mission_summary(
                     mission
                 )
             )
 
-            return
+            self._append_notification(
+                summary
+            )
 
-        # -----------------------------------------------------
-        # FAILED
-        # -----------------------------------------------------
+            # Le Manager garde également
+            # une trace conversationnelle
+            # du travail terminé.
+            self.memory.add_session(
+                "system",
+                summary,
+            )
+
+            return
 
         if current == "failed":
 
@@ -624,10 +625,6 @@ class Manager:
 
             return
 
-        # -----------------------------------------------------
-        # CANCELLED
-        # -----------------------------------------------------
-
         if current == "cancelled":
 
             self._append_notification(
@@ -638,7 +635,7 @@ class Manager:
             )
 
     # =========================================================
-    # NOTIFY
+    # ENGINE NOTIFY
     # =========================================================
 
     def notify(
@@ -646,8 +643,10 @@ class Manager:
         text: str,
     ) -> None:
 
-        task = self._task_from_event(
-            text
+        task = (
+            self._task_from_event(
+                text
+            )
         )
 
         human = (
@@ -691,7 +690,84 @@ class Manager:
             return notifications
 
     # =========================================================
-    # NATURAL COMMAND
+    # ACTIVE MISSIONS CONTEXT
+    # =========================================================
+
+    def _active_missions_context(
+        self,
+    ) -> str:
+
+        lines = []
+
+        for mission in (
+            self.missions.list()
+        ):
+
+            self.missions.refresh(
+                mission,
+                self.tasks,
+            )
+
+            if mission.status not in {
+                "planning",
+                "queued",
+                "running",
+                "waiting_approval",
+            }:
+
+                continue
+
+            lines.append(
+                (
+                    f"- {mission.title}\n"
+                    f"  Statut : "
+                    f"{mission.status}"
+                )
+            )
+
+            completed = 0
+
+            total = len(
+                mission.task_ids
+            )
+
+            for task_id in (
+                mission.task_ids
+            ):
+
+                task = (
+                    self.tasks.get(
+                        task_id
+                    )
+                )
+
+                if (
+                    task is not None
+                    and task.status
+                    == "completed"
+                ):
+
+                    completed += 1
+
+            lines.append(
+                (
+                    f"  Progression : "
+                    f"{completed}/{total}"
+                )
+            )
+
+        if not lines:
+
+            return (
+                "Aucune mission active."
+            )
+
+        return "\n".join(
+            lines
+        )
+
+    # =========================================================
+    # COMMAND NORMALIZATION
     # =========================================================
 
     @staticmethod
@@ -721,6 +797,10 @@ class Manager:
             )
             .split()
         )
+
+    # =========================================================
+    # NATURAL APPROVAL
+    # =========================================================
 
     @classmethod
     def _looks_like_approval(
@@ -763,7 +843,6 @@ class Manager:
 
         prefixes = (
             "ok pour ",
-            "okay pour ",
             "je valide ",
             "je confirme ",
             "tu peux modifier",
@@ -778,6 +857,10 @@ class Manager:
         return value.startswith(
             prefixes
         )
+
+    # =========================================================
+    # NATURAL REJECTION
+    # =========================================================
 
     @classmethod
     def _looks_like_rejection(
@@ -832,30 +915,74 @@ class Manager:
         message: str,
     ) -> str:
 
-        try:
+        memory_context = (
+            self.memory.context()
+        )
 
-            return self.llm.chat(
-                f"""
-Tu es le Manager d'Agent-OS.
+        missions_context = (
+            self._active_missions_context()
+        )
+
+        system = """
+Tu es le Manager personnel d'Agent-OS.
 
 Tu es l'interlocuteur principal de l'utilisateur.
 
-Tu peux discuter normalement avec lui pendant que
-d'autres workers travaillent en parallèle.
+IMPORTANT :
 
-Ne prétends jamais qu'une mission est terminée
-si le système ne l'a pas réellement terminée.
+Tu n'es PAS un assistant spécialisé en programmation.
 
+Tu es un interlocuteur généraliste.
+
+Si l'utilisateur parle de tortues,
+il parle probablement des animaux sauf indication contraire.
+
+Si l'utilisateur parle de cuisine,
+de météo, de voitures, de poissons,
+de jardinage ou de sa journée,
+réponds naturellement sur ce sujet.
+
+Ne ramène jamais spontanément une discussion
+vers Python, Agent-OS ou la programmation.
+
+Tu peux discuter normalement pendant que
+les workers travaillent en arrière-plan.
+
+Tu connais uniquement les missions indiquées
+dans le contexte système.
+
+Ne prétends jamais qu'une mission a avancé,
+échoué ou réussi si le contexte ne l'indique pas.
+
+Ne prétends jamais avoir utilisé un outil
+si aucun outil réel n'a été utilisé.
+
+Réponds en français naturel.
+
+Utilise le tutoiement.
+
+Sois direct et conversationnel.
+"""
+
+        prompt = f"""
 CONTEXTE MÉMOIRE :
 
-{self.memory.context()}
+{memory_context}
 
-MESSAGE COURANT :
+MISSIONS ACTIVES :
+
+{missions_context}
+
+MESSAGE UTILISATEUR :
 
 {message}
-
-Réponds naturellement en français.
 """
+
+        try:
+
+            return self.llm.chat(
+                prompt,
+                system=system,
             )
 
         except LLMError as exc:
@@ -894,12 +1021,12 @@ Réponds naturellement en français.
                 active += 1
 
         return (
-            "Équipe disponible : "
+            "Workers : "
             + ", ".join(
                 self.engine.workers
             )
             + "\n"
-            + "Travaux actuellement exécutés : "
+            + "Travaux en cours : "
             + str(
                 len(
                     self.engine.running
@@ -909,7 +1036,7 @@ Réponds naturellement en français.
             + "Missions actives : "
             + str(active)
             + "\n"
-            + "Décisions en attente : "
+            + "Approbations : "
             + str(
                 len(
                     self.approvals.pending()
@@ -918,7 +1045,7 @@ Réponds naturellement en français.
         )
 
     # =========================================================
-    # APPROVAL RESPONSE
+    # APPROVE
     # =========================================================
 
     def _approve(
@@ -930,7 +1057,7 @@ Réponds naturellement en français.
         )
 
         task = (
-            pending[-1]
+            pending[0]
             if pending
             else None
         )
@@ -941,15 +1068,6 @@ Réponds naturellement en français.
         )
 
         if task is None:
-
-            return response
-
-        if (
-            "autor"
-            not in response.lower()
-            and "termin"
-            not in response.lower()
-        ):
 
             return response
 
@@ -967,8 +1085,12 @@ Réponds naturellement en français.
             "C'est validé.\n\n"
             "La modification a été appliquée. "
             "Je poursuis automatiquement "
-            "avec la suite de la mission."
+            "la mission."
         )
+
+    # =========================================================
+    # REJECT
+    # =========================================================
 
     def _reject(
         self,
@@ -979,7 +1101,7 @@ Réponds naturellement en français.
         )
 
         task = (
-            pending[-1]
+            pending[0]
             if pending
             else None
         )
@@ -1005,7 +1127,8 @@ Réponds naturellement en français.
 
         return (
             "D'accord. "
-            "Je n'applique pas cette modification."
+            "Je n'applique pas "
+            "cette modification."
         )
 
     # =========================================================
@@ -1060,7 +1183,7 @@ Réponds naturellement en français.
             return self._status()
 
         # =====================================================
-        # NATURAL APPROVAL
+        # APPROVALS
         # =====================================================
 
         if (
@@ -1078,10 +1201,6 @@ Réponds naturellement en français.
             ):
 
                 return self._reject()
-
-        # =====================================================
-        # EXACT APPROVAL
-        # =====================================================
 
         if command in {
             "oui",
@@ -1104,7 +1223,7 @@ Réponds naturellement en français.
             return self._reject()
 
         # =====================================================
-        # MEMORY
+        # MEMORY INPUT
         # =====================================================
 
         self.memory.add_session(
@@ -1117,15 +1236,17 @@ Réponds naturellement en français.
         )
 
         # =====================================================
-        # ROUTING
+        # ROUTER
         # =====================================================
 
-        route = self.router.route(
-            value
+        route = (
+            self.router.route(
+                value
+            )
         )
 
         # =====================================================
-        # CONVERSATION
+        # NORMAL CONVERSATION
         # =====================================================
 
         if (
@@ -1175,12 +1296,19 @@ Réponds naturellement en français.
             mission.id
         ] = mission.status
 
-        return (
+        response = (
             self.orchestrator
             .format_created(
                 mission
             )
         )
+
+        self.memory.add_session(
+            "assistant",
+            response,
+        )
+
+        return response
 
     # =========================================================
     # SHUTDOWN
