@@ -7,21 +7,14 @@ from agentos.manager import (
     Manager,
 )
 
+from agentos.mission_control import (
+    MissionControl,
+)
+
 
 def recover_active_work(
     manager: Manager,
 ) -> dict:
-    # =========================================================
-    # 1. EXISTING TASK RECOVERY
-    # =========================================================
-    #
-    # On reprend d'abord les tâches qui existaient
-    # AVANT ce processus.
-    #
-    # Important : cette étape doit arriver avant
-    # recover_planning_missions(), car celle-ci
-    # peut créer de nouvelles tâches RUNNING.
-
     active_before = (
         manager.missions.active(
             manager.tasks
@@ -44,18 +37,10 @@ def recover_active_work(
         )
     )
 
-    # =========================================================
-    # 2. INTERRUPTED PLANNING RECOVERY
-    # =========================================================
-
     planning_recovery = (
         manager.orchestrator
         .recover_planning_missions()
     )
-
-    # =========================================================
-    # 3. FINAL STATE
-    # =========================================================
 
     active_after = (
         manager.missions.active(
@@ -121,6 +106,14 @@ def print_recovery_report(
         or []
     )
 
+    paused = (
+        task_recovery.get(
+            "paused",
+            [],
+        )
+        or []
+    )
+
     resumed_planning = (
         planning_recovery.get(
             "resumed",
@@ -157,6 +150,7 @@ def print_recovery_report(
         interrupted
         or submitted
         or waiting_approval
+        or paused
         or resumed_planning
         or duplicates
         or failed_planning
@@ -164,7 +158,7 @@ def print_recovery_report(
         return
 
     print(
-        "[REPRISE V3.6]"
+        "[REPRISE V3.7]"
     )
 
     if active_missions:
@@ -213,6 +207,17 @@ def print_recovery_report(
             )
         )
 
+    if paused:
+        print(
+            (
+                "Tâches conservées "
+                "en pause : "
+            )
+            + str(
+                len(paused)
+            )
+        )
+
     if resumed_planning:
         print(
             (
@@ -224,9 +229,7 @@ def print_recovery_report(
             )
         )
 
-    for item in (
-        duplicates
-    ):
+    for item in duplicates:
         print(
             (
                 "Mission interrompue annulée "
@@ -237,9 +240,7 @@ def print_recovery_report(
             + item["duplicate_of"]
         )
 
-    for item in (
-        failed_planning
-    ):
+    for item in failed_planning:
         print(
             (
                 "Échec de reprise "
@@ -293,8 +294,8 @@ def main() -> None:
 
     print(
         (
-            "AGENT-OS V3.6 — "
-            "RESILIENT MISSIONS"
+            "AGENT-OS V3.7 — "
+            "MISSION CONTROL"
         )
     )
 
@@ -304,12 +305,17 @@ def main() -> None:
 
     print(
         "\nCommandes : "
-        "status | missions | tasks | "
-        "approvals | memory | quit\n"
+        "status | missions | tasks | approvals | memory\n"
+        "Contrôle : pause M-xxx | reprends M-xxx | "
+        "annule M-xxx | retente M-xxx | quit\n"
     )
 
-    manager = (
-        Manager()
+    manager = Manager()
+
+    control = MissionControl(
+        missions=manager.missions,
+        tasks=manager.tasks,
+        engine=manager.engine,
     )
 
     recovery = (
@@ -328,9 +334,7 @@ def main() -> None:
 
     notification_thread = (
         threading.Thread(
-            target=(
-                notification_loop
-            ),
+            target=notification_loop,
             args=(
                 manager,
                 stop_notifications,
@@ -361,6 +365,26 @@ def main() -> None:
                 == "quit"
             ):
                 break
+
+            control_response = (
+                control.handle(
+                    message
+                )
+            )
+
+            if (
+                control_response
+                is not None
+            ):
+                print()
+                print(
+                    "MANAGER >"
+                )
+                print(
+                    control_response
+                )
+                print()
+                continue
 
             response = (
                 manager.handle(

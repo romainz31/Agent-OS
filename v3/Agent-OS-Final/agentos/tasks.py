@@ -16,6 +16,7 @@ class TaskStatus(str, Enum):
     WAITING_DEPENDENCY = "waiting_dependency"
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
+    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -42,14 +43,19 @@ class Task:
 
 class TaskManager:
     def __init__(self) -> None:
-        self.store = JsonStore(DATA_DIR / "tasks.json", [])
+        self.store = JsonStore(
+            DATA_DIR / "tasks.json",
+            [],
+        )
         self.lock = threading.RLock()
         self.tasks: dict[str, Task] = {}
         self._load()
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(
+            timezone.utc
+        ).isoformat()
 
     def _load(self) -> None:
         loaded = self.store.load()
@@ -122,20 +128,15 @@ class TaskManager:
 
             self.tasks[task.id] = task
             self._save()
-
             return task
 
     def get(
         self,
         task_id: str,
     ) -> Task | None:
-        return self.tasks.get(
-            task_id
-        )
+        return self.tasks.get(task_id)
 
-    def list(
-        self,
-    ) -> list[Task]:
+    def list(self) -> list[Task]:
         return sorted(
             self.tasks.values(),
             key=lambda task: task.created_at,
@@ -148,15 +149,10 @@ class TaskManager:
         **changes,
     ) -> Task:
         with self.lock:
-            task = self.tasks[
-                task_id
-            ]
+            task = self.tasks[task_id]
 
             for key, value in changes.items():
-                if not hasattr(
-                    task,
-                    key,
-                ):
+                if not hasattr(task, key):
                     raise ValueError(
                         f"Champ inconnu : {key}"
                     )
@@ -167,12 +163,8 @@ class TaskManager:
                     value,
                 )
 
-            task.updated_at = (
-                self._now()
-            )
-
+            task.updated_at = self._now()
             self._save()
-
             return task
 
     def dependencies_satisfied_ids(
@@ -182,9 +174,7 @@ class TaskManager:
         return all(
             self.tasks.get(task_id)
             and (
-                self.tasks[
-                    task_id
-                ].status
+                self.tasks[task_id].status
                 == TaskStatus.COMPLETED.value
             )
             for task_id in ids
@@ -195,10 +185,8 @@ class TaskManager:
         task: Task,
     ) -> str | None:
         for task_id in task.depends_on:
-            dependency = (
-                self.tasks.get(
-                    task_id
-                )
+            dependency = self.tasks.get(
+                task_id
             )
 
             if dependency is None:
@@ -244,10 +232,8 @@ class TaskManager:
         context = []
 
         for task_id in task.depends_on:
-            dependency = (
-                self.tasks.get(
-                    task_id
-                )
+            dependency = self.tasks.get(
+                task_id
             )
 
             if dependency is None:
@@ -266,17 +252,50 @@ class TaskManager:
 
         return context
 
+    def set_paused(
+        self,
+        task_id: str,
+    ) -> Task:
+        task = self.tasks[task_id]
+
+        if task.status in {
+            TaskStatus.PENDING.value,
+            TaskStatus.WAITING_DEPENDENCY.value,
+        }:
+            return self.update(
+                task_id,
+                status=TaskStatus.PAUSED.value,
+            )
+
+        return task
+
+    def reset_for_execution(
+        self,
+        task_id: str,
+    ) -> Task:
+        task = self.tasks[task_id]
+
+        status = (
+            TaskStatus.PENDING.value
+            if (
+                not task.depends_on
+                or self.dependencies_satisfied_ids(
+                    task.depends_on
+                )
+            )
+            else TaskStatus.WAITING_DEPENDENCY.value
+        )
+
+        return self.update(
+            task_id,
+            status=status,
+            error=None,
+        )
+
     def recover_interrupted(
         self,
         task_ids: list[str] | None = None,
     ) -> list[str]:
-        """
-        Une tâche restée RUNNING dans tasks.json appartient
-        à un ancien processus.
-
-        On la remet dans un état exécutable au redémarrage.
-        """
-
         selected = (
             set(task_ids)
             if task_ids is not None
@@ -318,14 +337,11 @@ class TaskManager:
                     )
 
                 task.error = None
-                task.updated_at = (
-                    self._now()
-                )
+                task.updated_at = self._now()
 
                 recovered.append(
                     task.id
                 )
-
                 changed = True
 
             if changed:
@@ -355,10 +371,6 @@ class TaskManager:
                     )
                 )
 
-            lines.append(
-                line
-            )
+            lines.append(line)
 
-        return "\n".join(
-            lines
-        )
+        return "\n".join(lines)

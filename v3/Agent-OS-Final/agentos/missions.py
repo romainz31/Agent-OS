@@ -91,7 +91,6 @@ class MissionManager:
         ] = {}
 
         self._load()
-
         self._repair_human_ids()
 
     @staticmethod
@@ -103,9 +102,7 @@ class MissionManager:
     def _load(
         self,
     ) -> None:
-        loaded = (
-            self.store.load()
-        )
+        loaded = self.store.load()
 
         if not isinstance(
             loaded,
@@ -143,10 +140,6 @@ class MissionManager:
             ]
         )
 
-    # =========================================================
-    # HUMAN IDs
-    # =========================================================
-
     def _used_human_numbers(
         self,
     ) -> set[int]:
@@ -183,9 +176,7 @@ class MissionManager:
         while number in used:
             number += 1
 
-        return (
-            f"M-{number:03d}"
-        )
+        return f"M-{number:03d}"
 
     def _repair_human_ids(
         self,
@@ -221,7 +212,6 @@ class MissionManager:
                     used.add(
                         number
                     )
-
                     continue
 
             number = 1
@@ -233,18 +223,11 @@ class MissionManager:
                 f"M-{number:03d}"
             )
 
-            used.add(
-                number
-            )
-
+            used.add(number)
             changed = True
 
         if changed:
             self._save()
-
-    # =========================================================
-    # CREATE
-    # =========================================================
 
     def create(
         self,
@@ -285,12 +268,7 @@ class MissionManager:
             ] = mission
 
             self._save()
-
             return mission
-
-    # =========================================================
-    # ACCESS
-    # =========================================================
 
     def get(
         self,
@@ -333,19 +311,15 @@ class MissionManager:
         if not reference:
             return None
 
-        direct = (
-            self.get(
-                reference
-            )
+        direct = self.get(
+            reference
         )
 
         if direct is not None:
             return direct
 
-        return (
-            self.get_by_human_id(
-                reference
-            )
+        return self.get_by_human_id(
+            reference
         )
 
     def list(
@@ -358,10 +332,6 @@ class MissionManager:
             ),
             reverse=True,
         )
-
-    # =========================================================
-    # PLAN
-    # =========================================================
 
     def attach_plan(
         self,
@@ -380,10 +350,7 @@ class MissionManager:
             )
 
             mission.plan = plan
-
-            mission.task_ids = (
-                task_ids
-            )
+            mission.task_ids = task_ids
 
             mission.status = (
                 "running"
@@ -396,12 +363,7 @@ class MissionManager:
             )
 
             self._save()
-
             return mission
-
-    # =========================================================
-    # MANUAL STATUS
-    # =========================================================
 
     def set_status(
         self,
@@ -421,9 +383,7 @@ class MissionManager:
                 ]
             )
 
-            mission.status = (
-                status
-            )
+            mission.status = status
 
             if metadata_patch:
                 metadata = dict(
@@ -448,109 +408,158 @@ class MissionManager:
             )
 
             self._save()
-
             return mission
 
-    # =========================================================
-    # STATUS
-    # =========================================================
+    def set_control_status(
+        self,
+        mission_id: str,
+        control_status: str | None,
+    ) -> Mission:
+        with self.lock:
+            mission = (
+                self.missions[
+                    mission_id
+                ]
+            )
+
+            metadata = dict(
+                mission.metadata
+                if isinstance(
+                    mission.metadata,
+                    dict,
+                )
+                else {}
+            )
+
+            if control_status is None:
+                metadata.pop(
+                    "control_status",
+                    None,
+                )
+            else:
+                metadata[
+                    "control_status"
+                ] = control_status
+
+            mission.metadata = metadata
+            mission.updated_at = (
+                self._now()
+            )
+
+            self._save()
+            return mission
 
     def refresh(
         self,
         mission: Mission,
         tasks: TaskManager,
     ) -> Mission:
-        # Une mission planning sans tâche
-        # est volontairement laissée planning.
-        # La récupération V3.6 est responsable
-        # de décider s'il faut la reprendre
-        # ou l'annuler comme doublon.
-        if not mission.task_ids:
-            return mission
-
-        linked = [
-            tasks.get(
-                task_id
+        metadata = (
+            mission.metadata
+            if isinstance(
+                mission.metadata,
+                dict,
             )
-            for task_id
-            in mission.task_ids
-        ]
+            else {}
+        )
 
-        linked = [
-            task
-            for task
-            in linked
-            if task is not None
-        ]
+        control_status = (
+            metadata.get(
+                "control_status"
+            )
+        )
 
-        if not linked:
-            status = "failed"
-
-        elif any(
-            task.status
-            == TaskStatus.FAILED.value
-            for task
-            in linked
-        ):
-            status = "failed"
-
-        elif any(
-            task.status
-            == TaskStatus.CANCELLED.value
-            for task
-            in linked
+        if (
+            control_status
+            == "cancelled"
         ):
             status = "cancelled"
 
-        elif all(
-            task.status
-            == TaskStatus.COMPLETED.value
-            for task
-            in linked
-        ):
-            status = "completed"
-
-        elif any(
-            task.status
-            == TaskStatus.WAITING_APPROVAL.value
-            for task
-            in linked
-        ):
-            status = (
-                "waiting_approval"
-            )
-
-        elif any(
-            task.status
-            == TaskStatus.RUNNING.value
-            for task
-            in linked
-        ):
-            status = "running"
+        elif not mission.task_ids:
+            status = mission.status
 
         else:
-            status = "queued"
+            linked = [
+                tasks.get(
+                    task_id
+                )
+                for task_id
+                in mission.task_ids
+            ]
+
+            linked = [
+                task
+                for task
+                in linked
+                if task is not None
+            ]
+
+            if not linked:
+                status = "failed"
+
+            elif any(
+                task.status
+                == TaskStatus.FAILED.value
+                for task
+                in linked
+            ):
+                status = "failed"
+
+            elif all(
+                task.status
+                == TaskStatus.COMPLETED.value
+                for task
+                in linked
+            ):
+                status = "completed"
+
+            elif (
+                control_status
+                == "paused"
+            ):
+                status = "paused"
+
+            elif any(
+                task.status
+                == TaskStatus.CANCELLED.value
+                for task
+                in linked
+            ):
+                status = "cancelled"
+
+            elif any(
+                task.status
+                == TaskStatus.WAITING_APPROVAL.value
+                for task
+                in linked
+            ):
+                status = (
+                    "waiting_approval"
+                )
+
+            elif any(
+                task.status
+                == TaskStatus.RUNNING.value
+                for task
+                in linked
+            ):
+                status = "running"
+
+            else:
+                status = "queued"
 
         if (
             mission.status
             != status
         ):
             with self.lock:
-                mission.status = (
-                    status
-                )
-
+                mission.status = status
                 mission.updated_at = (
                     self._now()
                 )
-
                 self._save()
 
         return mission
-
-    # =========================================================
-    # PROGRESS
-    # =========================================================
 
     def progress(
         self,
@@ -585,19 +594,13 @@ class MissionManager:
             total,
         )
 
-    # =========================================================
-    # ACTIVE
-    # =========================================================
-
     def active(
         self,
         tasks: TaskManager,
     ) -> list[Mission]:
         result = []
 
-        for mission in (
-            self.list()
-        ):
+        for mission in self.list():
             self.refresh(
                 mission,
                 tasks,
@@ -608,16 +611,13 @@ class MissionManager:
                 "queued",
                 "running",
                 "waiting_approval",
+                "paused",
             }:
                 result.append(
                     mission
                 )
 
         return result
-
-    # =========================================================
-    # DISPLAY
-    # =========================================================
 
     def format(
         self,
@@ -630,9 +630,7 @@ class MissionManager:
 
         sections = []
 
-        for mission in (
-            self.list()
-        ):
+        for mission in self.list():
             self.refresh(
                 mission,
                 tasks,
@@ -669,7 +667,6 @@ class MissionManager:
                             "introuvable"
                         )
                     )
-
                     continue
 
                 lines.append(
@@ -682,9 +679,7 @@ class MissionManager:
                 )
 
             sections.append(
-                "\n".join(
-                    lines
-                )
+                "\n".join(lines)
             )
 
         return "\n\n".join(

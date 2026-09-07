@@ -14,6 +14,7 @@ class WorkerEngine:
         TaskStatus.FAILED.value,
         TaskStatus.CANCELLED.value,
         TaskStatus.WAITING_APPROVAL.value,
+        TaskStatus.PAUSED.value,
     }
 
     def __init__(
@@ -24,22 +25,17 @@ class WorkerEngine:
         self.tasks = tasks
         self.notifier = notifier
 
-        self.pool = (
-            ThreadPoolExecutor(
-                max_workers=MAX_WORKERS
-            )
+        self.pool = ThreadPoolExecutor(
+            max_workers=MAX_WORKERS
         )
 
         self.workers = {}
-
         self.running: dict[
             str,
             Future,
         ] = {}
 
-        self.lock = (
-            threading.RLock()
-        )
+        self.lock = threading.RLock()
 
     def register(
         self,
@@ -63,10 +59,8 @@ class WorkerEngine:
         self,
         task_id: str,
     ) -> bool:
-        task = (
-            self.tasks.get(
-                task_id
-            )
+        task = self.tasks.get(
+            task_id
         )
 
         if task is None:
@@ -137,10 +131,8 @@ class WorkerEngine:
 
             return False
 
-        worker = (
-            self.workers.get(
-                task.worker
-            )
+        worker = self.workers.get(
+            task.worker
         )
 
         if worker is None:
@@ -180,9 +172,7 @@ class WorkerEngine:
             error=None,
         )
 
-        payload = (
-            task.to_dict()
-        )
+        payload = task.to_dict()
 
         payload[
             "dependency_context"
@@ -194,11 +184,9 @@ class WorkerEngine:
         )
 
         try:
-            future = (
-                self.pool.submit(
-                    worker.execute,
-                    payload,
-                )
+            future = self.pool.submit(
+                worker.execute,
+                payload,
             )
 
         except Exception as exc:
@@ -252,12 +240,34 @@ class WorkerEngine:
                 None,
             )
 
+        current = self.tasks.get(
+            task_id
+        )
+
+        if current is None:
+            return
+
+        if (
+            current.status
+            == TaskStatus.CANCELLED.value
+        ):
+            return
+
         try:
-            result = (
-                future.result()
-            )
+            result = future.result()
 
         except Exception as exc:
+            current = self.tasks.get(
+                task_id
+            )
+
+            if (
+                current is not None
+                and current.status
+                == TaskStatus.CANCELLED.value
+            ):
+                return
+
             error = str(exc)
 
             self.tasks.update(
@@ -279,6 +289,17 @@ class WorkerEngine:
                 task_id
             )
 
+            return
+
+        current = self.tasks.get(
+            task_id
+        )
+
+        if (
+            current is None
+            or current.status
+            == TaskStatus.CANCELLED.value
+        ):
             return
 
         if not result.success:
@@ -398,20 +419,26 @@ class WorkerEngine:
                     task.id
                 )
 
+    def cancel(
+        self,
+        task_id: str,
+    ) -> bool:
+        with self.lock:
+            future = self.running.get(
+                task_id
+            )
+
+        if future is None:
+            return False
+
+        future.cancel()
+
+        return True
+
     def recover(
         self,
         task_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """
-        Reprise V3.6 :
-
-        RUNNING ancienne session -> remise en file.
-        PENDING -> relancée.
-        WAITING_DEPENDENCY -> réévaluée.
-        WAITING_APPROVAL -> reste bloquée.
-        COMPLETED/FAILED/CANCELLED -> jamais relancées.
-        """
-
         if task_ids is None:
             selected = [
                 task.id
@@ -487,12 +514,24 @@ class WorkerEngine:
             )
         ]
 
+        paused = [
+            task.id
+            for task
+            in self.tasks.list()
+            if (
+                task.id in selected_set
+                and task.status
+                == TaskStatus.PAUSED.value
+            )
+        ]
+
         return {
             "interrupted": interrupted,
             "submitted": submitted,
             "waiting_approval": (
                 waiting_approval
             ),
+            "paused": paused,
         }
 
     def shutdown(self) -> None:
