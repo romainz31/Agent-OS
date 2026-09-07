@@ -73,10 +73,7 @@ class Planner:
                 text.find("\n")
             )
 
-            if (
-                first_newline
-                != -1
-            ):
+            if first_newline != -1:
 
                 text = text[
                     first_newline + 1:
@@ -94,6 +91,109 @@ class Planner:
                 )
 
         return text.strip()
+
+    # =========================================================
+    # EXPLICIT FILES
+    # =========================================================
+
+    def _explicit_files(
+        self,
+        message: str,
+    ) -> list[str]:
+
+        matches = (
+            self.FILE_RE.findall(
+                message.replace(
+                    "\\",
+                    "/",
+                )
+            )
+        )
+
+        files = []
+
+        for path in matches:
+
+            path = path.strip(
+                "`'\".,;:()[]{} "
+            )
+
+            if (
+                path
+                and path not in files
+            ):
+
+                files.append(
+                    path
+                )
+
+        return files
+
+    # =========================================================
+    # SIMPLE LOCAL DEVELOPMENT
+    # =========================================================
+
+    def _simple_local_development(
+        self,
+        *,
+        message: str,
+        initial_worker: str,
+    ) -> list[PlanStep] | None:
+
+        """
+        Cas déterministe :
+
+        Si l'utilisateur demande directement à Developer
+        de travailler sur UN fichier explicitement nommé,
+        inutile de laisser le LLM inventer 2 Developers,
+        un Researcher ou plusieurs Testers.
+
+        Pipeline imposé :
+
+        Developer -> Tester
+        """
+
+        if (
+            initial_worker
+            != "developer"
+        ):
+
+            return None
+
+        files = self._explicit_files(
+            message
+        )
+
+        if len(files) != 1:
+
+            return None
+
+        target = files[0]
+
+        return [
+            PlanStep(
+                title=(
+                    f"Modifier {target}"
+                ),
+                description=message,
+                worker="developer",
+                depends_on=[],
+            ),
+            PlanStep(
+                title=(
+                    f"Vérifier {target}"
+                ),
+                description=(
+                    "Tester réellement le fichier "
+                    f"{target} après la modification "
+                    "demandée par l'utilisateur."
+                ),
+                worker="tester",
+                depends_on=[
+                    0
+                ],
+            ),
+        ]
 
     # =========================================================
     # VALIDATION
@@ -234,17 +334,8 @@ class Planner:
         message: str,
     ) -> list[PlanStep]:
 
-        """
-        Si l'utilisateur donne déjà un chemin de fichier
-        explicite, un Researcher chargé uniquement de
-        retrouver/localiser ce fichier est inutile.
-        """
-
-        if not self.FILE_RE.search(
-            message.replace(
-                "\\",
-                "/",
-            )
+        if not self._explicit_files(
+            message
         ):
 
             return steps
@@ -303,8 +394,7 @@ class Planner:
             return steps
 
         old_to_new = {}
-
-        new_steps = []
+        result = []
 
         for old_index, step in enumerate(
             steps
@@ -319,10 +409,10 @@ class Planner:
             old_to_new[
                 old_index
             ] = len(
-                new_steps
+                result
             )
 
-            new_steps.append(
+            result.append(
                 PlanStep(
                     title=step.title,
                     description=(
@@ -381,13 +471,13 @@ class Planner:
                         converted
                     )
 
-            new_steps[
+            result[
                 new_index
             ].depends_on = (
                 dependencies
             )
 
-        return new_steps
+        return result
 
     # =========================================================
     # WORKFLOW RULES
@@ -397,16 +487,6 @@ class Planner:
     def _ensure_workflow_rules(
         steps: list[PlanStep],
     ) -> list[PlanStep]:
-
-        """
-        Règles imposées par Agent-OS.
-
-        Le LLM propose.
-        Agent-OS contrôle.
-
-        Chaque Developer doit être suivi
-        d'un Tester.
-        """
 
         result = list(
             steps
@@ -436,7 +516,6 @@ class Planner:
                 ):
 
                     tester_exists = True
-
                     break
 
             if tester_exists:
@@ -581,6 +660,27 @@ class Planner:
         initial_worker: str,
     ) -> list[PlanStep]:
 
+        # =====================================================
+        # DETERMINISTIC SIMPLE CASE
+        # =====================================================
+
+        simple = (
+            self._simple_local_development(
+                message=message,
+                initial_worker=(
+                    initial_worker
+                ),
+            )
+        )
+
+        if simple is not None:
+
+            return simple
+
+        # =====================================================
+        # COMPLEX CASE -> LLM PLANNER
+        # =====================================================
+
         prompt = f"""
 Tu es le Planner d'Agent-OS.
 
@@ -598,14 +698,16 @@ WORKER INITIAL SUGGÉRÉ :
 WORKERS DISPONIBLES :
 
 researcher
-- recherche des informations sur Internet.
-- NE sert PAS à trouver un fichier local déjà nommé.
+- recherche réellement des informations sur Internet.
+- ne sert pas à trouver des fichiers locaux déjà nommés.
 
 developer
-- lit, crée et modifie des fichiers du workspace.
+- lit, crée et modifie les fichiers du workspace.
+- une opération sur un fichier doit si possible
+  être réalisée en UNE seule tâche Developer.
 
 tester
-- vérifie réellement les fichiers et le code.
+- teste réellement le travail du Developer.
 
 ai_worker
 - analyse, réfléchit, rédige et synthétise.
@@ -616,7 +718,7 @@ RÈGLES :
 
 2. Ne réalise jamais toi-même la mission.
 
-3. Crée uniquement les étapes réellement nécessaires.
+3. Crée uniquement les étapes nécessaires.
 
 4. Maximum 8 étapes.
 
@@ -625,24 +727,26 @@ RÈGLES :
 
 6. La première étape a l'index 0.
 
-7. Un Developer doit normalement être suivi
+7. Ne découpe PAS artificiellement une modification
+   de fichier en plusieurs tâches Developer.
+
+8. "Lire le fichier" puis "modifier le fichier"
+   ne doivent PAS être deux tâches séparées.
+   Developer sait lire le fichier lui-même.
+
+9. Un Developer doit normalement être suivi
    par un Tester.
 
-8. Si le chemin du fichier est déjà fourni,
-   NE crée PAS de Researcher pour trouver
-   ou localiser ce fichier.
+10. Si le chemin d'un fichier est fourni,
+    ne crée pas de Researcher pour le trouver.
 
-9. Researcher sert uniquement lorsqu'une vraie
-   recherche Internet ou documentaire est nécessaire.
+11. Researcher sert uniquement pour une vraie
+    recherche Internet ou documentaire.
 
-10. Ne crée jamais une tâche pour demander
+12. Ne crée jamais une tâche pour demander
     l'autorisation utilisateur.
-    Agent-OS gère les approbations séparément.
 
-11. Les descriptions doivent contenir assez
-    de contexte pour que le worker puisse travailler.
-
-12. Retourne uniquement du JSON valide.
+13. Retourne uniquement du JSON valide.
 
 FORMAT EXACT :
 
@@ -690,8 +794,10 @@ FORMAT EXACT :
                     )
                 )
 
-            steps = self._validate(
-                parsed
+            steps = (
+                self._validate(
+                    parsed
+                )
             )
 
         except (
