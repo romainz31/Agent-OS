@@ -3,345 +3,39 @@ from __future__ import annotations
 import threading
 import time
 
-from agentos.manager import (
-    Manager,
+from agentos.runtime import (
+    AgentOSRuntime,
 )
-
-from agentos.mission_control import (
-    MissionControl,
-)
-
-
-def recover_active_work(
-    manager: Manager,
-) -> dict:
-    active_before = (
-        manager.missions.active(
-            manager.tasks
-        )
-    )
-
-    existing_task_ids = []
-
-    for mission in (
-        active_before
-    ):
-        if mission.task_ids:
-            existing_task_ids.extend(
-                mission.task_ids
-            )
-
-    task_recovery = (
-        manager.engine.recover(
-            existing_task_ids
-        )
-    )
-
-    planning_recovery = (
-        manager.orchestrator
-        .recover_planning_missions()
-    )
-
-    repair_recovery = (
-        manager.orchestrator
-        .repair_loop
-        .recover_pending_repairs()
-    )
-
-    active_after = (
-        manager.missions.active(
-            manager.tasks
-        )
-    )
-
-    return {
-        "task_recovery": (
-            task_recovery
-        ),
-        "planning_recovery": (
-            planning_recovery
-        ),
-        "repair_recovery": (
-            repair_recovery
-        ),
-        "active_missions": [
-            mission.human_id
-            for mission
-            in active_after
-        ],
-    }
 
 
 def print_recovery_report(
-    recovery: dict,
+    runtime: AgentOSRuntime,
 ) -> None:
-    task_recovery = (
-        recovery.get(
-            "task_recovery",
-            {},
-        )
-        or {}
+    lines = (
+        runtime
+        .recovery_report_lines()
     )
 
-    planning_recovery = (
-        recovery.get(
-            "planning_recovery",
-            {},
-        )
-        or {}
-    )
-
-    repair_recovery = (
-        recovery.get(
-            "repair_recovery",
-            {},
-        )
-        or {}
-    )
-
-    interrupted = (
-        task_recovery.get(
-            "interrupted",
-            [],
-        )
-        or []
-    )
-
-    submitted = (
-        task_recovery.get(
-            "submitted",
-            [],
-        )
-        or []
-    )
-
-    waiting_approval = (
-        task_recovery.get(
-            "waiting_approval",
-            [],
-        )
-        or []
-    )
-
-    paused = (
-        task_recovery.get(
-            "paused",
-            [],
-        )
-        or []
-    )
-
-    resumed_planning = (
-        planning_recovery.get(
-            "resumed",
-            [],
-        )
-        or []
-    )
-
-    duplicates = (
-        planning_recovery.get(
-            "cancelled_duplicates",
-            [],
-        )
-        or []
-    )
-
-    failed_planning = (
-        planning_recovery.get(
-            "failed",
-            [],
-        )
-        or []
-    )
-
-    restored_repairs = (
-        repair_recovery.get(
-            "restored",
-            [],
-        )
-        or []
-    )
-
-    exhausted_repairs = (
-        repair_recovery.get(
-            "exhausted",
-            [],
-        )
-        or []
-    )
-
-    failed_repairs = (
-        repair_recovery.get(
-            "failed",
-            [],
-        )
-        or []
-    )
-
-    active_missions = (
-        recovery.get(
-            "active_missions",
-            [],
-        )
-        or []
-    )
-
-    if not (
-        interrupted
-        or submitted
-        or waiting_approval
-        or paused
-        or resumed_planning
-        or duplicates
-        or failed_planning
-        or restored_repairs
-        or exhausted_repairs
-        or failed_repairs
-    ):
+    if not lines:
         return
 
-    print(
-        "[REPRISE V3.8]"
-    )
-
-    if active_missions:
+    for line in lines:
         print(
-            (
-                "Missions actives "
-                "après reprise : "
-            )
-            + ", ".join(
-                active_missions
-            )
-        )
-
-    if interrupted:
-        print(
-            (
-                "Tâches interrompues "
-                "restaurées : "
-            )
-            + str(
-                len(interrupted)
-            )
-        )
-
-    if submitted:
-        print(
-            (
-                "Tâches relancées "
-                "automatiquement : "
-            )
-            + str(
-                len(submitted)
-            )
-        )
-
-    if waiting_approval:
-        print(
-            (
-                "Tâches toujours en attente "
-                "d'autorisation : "
-            )
-            + str(
-                len(
-                    waiting_approval
-                )
-            )
-        )
-
-    if paused:
-        print(
-            (
-                "Tâches conservées "
-                "en pause : "
-            )
-            + str(
-                len(paused)
-            )
-        )
-
-    if resumed_planning:
-        print(
-            (
-                "Missions reprises depuis "
-                "la planification : "
-            )
-            + ", ".join(
-                resumed_planning
-            )
-        )
-
-    if restored_repairs:
-        print(
-            (
-                "Boucles de correction "
-                "restaurées : "
-            )
-            + ", ".join(
-                restored_repairs
-            )
-        )
-
-    if exhausted_repairs:
-        print(
-            (
-                "Corrections automatiques "
-                "arrivées à leur limite : "
-            )
-            + str(
-                len(exhausted_repairs)
-            )
-        )
-
-    for item in duplicates:
-        print(
-            (
-                "Mission interrompue annulée "
-                "comme doublon : "
-            )
-            + item["mission"]
-            + " -> "
-            + item["duplicate_of"]
-        )
-
-    for item in failed_planning:
-        print(
-            (
-                "Échec de reprise "
-                "de planification : "
-            )
-            + item["mission"]
-            + " ("
-            + item["error"]
-            + ")"
-        )
-
-    for item in failed_repairs:
-        print(
-            (
-                "Échec de reprise "
-                "d'une correction : "
-            )
-            + item["task"]
-            + " ("
-            + item["error"]
-            + ")"
+            line
         )
 
     print()
 
 
 def notification_loop(
-    manager: Manager,
+    runtime: AgentOSRuntime,
     stop_event: threading.Event,
 ) -> None:
     while not (
         stop_event.is_set()
     ):
         notifications = (
-            manager.drain_notifications()
+            runtime.notifications()
         )
 
         for notification in (
@@ -372,8 +66,8 @@ def main() -> None:
 
     print(
         (
-            "AGENT-OS V3.8 — "
-            "AUTO-REPAIR LOOP"
+            "AGENT-OS V3.9 — "
+            "API-READY RUNTIME"
         )
     )
 
@@ -386,26 +80,13 @@ def main() -> None:
         "status | missions | tasks | approvals | memory\n"
         "Contrôle : pause M-xxx | reprends M-xxx | "
         "annule M-xxx | retente M-xxx | quit\n"
-        "V3.8 : Tester NON VALIDÉ -> Developer corrige -> Tester reteste "
-        "(3 corrections max)\n"
+        "API séparée : python -u .\\api_server.py\n"
     )
 
-    manager = Manager()
-
-    control = MissionControl(
-        missions=manager.missions,
-        tasks=manager.tasks,
-        engine=manager.engine,
-    )
-
-    recovery = (
-        recover_active_work(
-            manager
-        )
-    )
+    runtime = AgentOSRuntime()
 
     print_recovery_report(
-        recovery
+        runtime
     )
 
     stop_notifications = (
@@ -416,7 +97,7 @@ def main() -> None:
         threading.Thread(
             target=notification_loop,
             args=(
-                manager,
+                runtime,
                 stop_notifications,
             ),
             daemon=True,
@@ -446,30 +127,30 @@ def main() -> None:
             ):
                 break
 
-            control_response = (
-                control.handle(
-                    message
+            try:
+                result = (
+                    runtime.handle_message(
+                        message
+                    )
                 )
-            )
 
-            if (
-                control_response
-                is not None
-            ):
+            except ValueError as exc:
                 print()
                 print(
                     "MANAGER >"
                 )
                 print(
-                    control_response
+                    str(exc)
                 )
                 print()
                 continue
 
-            response = (
-                manager.handle(
-                    message
+            response = str(
+                result.get(
+                    "response",
+                    "",
                 )
+                or ""
             )
 
             if response:
@@ -501,11 +182,10 @@ def main() -> None:
             "\nArrêt du Manager..."
         )
 
-        manager.shutdown()
+        runtime.shutdown()
 
         for notification in (
-            manager
-            .drain_notifications()
+            runtime.notifications()
         ):
             print()
 
