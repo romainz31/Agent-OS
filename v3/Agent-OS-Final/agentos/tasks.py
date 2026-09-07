@@ -1,56 +1,364 @@
 from __future__ import annotations
-import threading, uuid
+
+import threading
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
 from agentos.config import DATA_DIR
 from agentos.storage import JsonStore
 
+
 class TaskStatus(str, Enum):
-    PENDING="pending"; WAITING_DEPENDENCY="waiting_dependency"; RUNNING="running"; WAITING_APPROVAL="waiting_approval"; COMPLETED="completed"; FAILED="failed"; CANCELLED="cancelled"
+    PENDING = "pending"
+    WAITING_DEPENDENCY = "waiting_dependency"
+    RUNNING = "running"
+    WAITING_APPROVAL = "waiting_approval"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
 
 @dataclass
 class Task:
-    id:str; title:str; description:str; worker:str; status:str; created_at:str; updated_at:str
-    result:str|None=None; result_data:dict[str,Any]=field(default_factory=dict); error:str|None=None
-    depends_on:list[str]=field(default_factory=list); metadata:dict[str,Any]=field(default_factory=dict)
-    def to_dict(self): return asdict(self)
+    id: str
+    title: str
+    description: str
+    worker: str
+    status: str
+    created_at: str
+    updated_at: str
+    result: str | None = None
+    result_data: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    depends_on: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 class TaskManager:
     def __init__(self) -> None:
-        self.store=JsonStore(DATA_DIR/"tasks.json",[]); self.lock=threading.RLock(); self.tasks={}; self._load()
-    def _now(self): return datetime.now(timezone.utc).isoformat()
-    def _load(self):
-        for item in self.store.load():
-            try: task=Task(**item); self.tasks[task.id]=task
-            except TypeError: pass
-    def _save(self): self.store.save([x.to_dict() for x in self.tasks.values()])
-    def create(self,*,title,description,worker,depends_on=None,metadata=None):
+        self.store = JsonStore(DATA_DIR / "tasks.json", [])
+        self.lock = threading.RLock()
+        self.tasks: dict[str, Task] = {}
+        self._load()
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _load(self) -> None:
+        loaded = self.store.load()
+
+        if not isinstance(loaded, list):
+            loaded = []
+
+        for item in loaded:
+            if not isinstance(item, dict):
+                continue
+
+            try:
+                task = Task(**item)
+            except TypeError:
+                continue
+
+            self.tasks[task.id] = task
+
+    def _save(self) -> None:
+        self.store.save(
+            [
+                task.to_dict()
+                for task in self.tasks.values()
+            ]
+        )
+
+    def create(
+        self,
+        *,
+        title: str,
+        description: str,
+        worker: str,
+        depends_on: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Task:
         with self.lock:
-            deps=list(dict.fromkeys(depends_on or [])); now=self._now()
-            status=TaskStatus.PENDING.value if not deps or self.dependencies_satisfied_ids(deps) else TaskStatus.WAITING_DEPENDENCY.value
-            task=Task("task_"+uuid.uuid4().hex[:12],title,description,worker,status,now,now,depends_on=deps,metadata=metadata or {})
-            self.tasks[task.id]=task; self._save(); return task
-    def get(self,task_id): return self.tasks.get(task_id)
-    def list(self): return sorted(self.tasks.values(),key=lambda x:x.created_at,reverse=True)
-    def update(self,task_id,**changes):
+            dependencies = list(
+                dict.fromkeys(
+                    depends_on or []
+                )
+            )
+
+            now = self._now()
+
+            status = (
+                TaskStatus.PENDING.value
+                if (
+                    not dependencies
+                    or self.dependencies_satisfied_ids(
+                        dependencies
+                    )
+                )
+                else TaskStatus.WAITING_DEPENDENCY.value
+            )
+
+            task = Task(
+                id=(
+                    "task_"
+                    + uuid.uuid4().hex[:12]
+                ),
+                title=title,
+                description=description,
+                worker=worker,
+                status=status,
+                created_at=now,
+                updated_at=now,
+                depends_on=dependencies,
+                metadata=metadata or {},
+            )
+
+            self.tasks[task.id] = task
+            self._save()
+
+            return task
+
+    def get(
+        self,
+        task_id: str,
+    ) -> Task | None:
+        return self.tasks.get(
+            task_id
+        )
+
+    def list(
+        self,
+    ) -> list[Task]:
+        return sorted(
+            self.tasks.values(),
+            key=lambda task: task.created_at,
+            reverse=True,
+        )
+
+    def update(
+        self,
+        task_id: str,
+        **changes,
+    ) -> Task:
         with self.lock:
-            task=self.tasks[task_id]
-            for k,v in changes.items():
-                if not hasattr(task,k): raise ValueError(f"Champ inconnu : {k}")
-                setattr(task,k,v)
-            task.updated_at=self._now(); self._save(); return task
-    def dependencies_satisfied_ids(self,ids): return all(self.tasks.get(i) and self.tasks[i].status==TaskStatus.COMPLETED.value for i in ids)
-    def dependency_failure(self,task):
-        for i in task.depends_on:
-            dep=self.tasks.get(i)
-            if dep is None:return f"Dépendance introuvable : {i}"
-            if dep.status==TaskStatus.FAILED.value:return f"Dépendance échouée : {i}"
-            if dep.status==TaskStatus.CANCELLED.value:return f"Dépendance annulée : {i}"
+            task = self.tasks[
+                task_id
+            ]
+
+            for key, value in changes.items():
+                if not hasattr(
+                    task,
+                    key,
+                ):
+                    raise ValueError(
+                        f"Champ inconnu : {key}"
+                    )
+
+                setattr(
+                    task,
+                    key,
+                    value,
+                )
+
+            task.updated_at = (
+                self._now()
+            )
+
+            self._save()
+
+            return task
+
+    def dependencies_satisfied_ids(
+        self,
+        ids: list[str],
+    ) -> bool:
+        return all(
+            self.tasks.get(task_id)
+            and (
+                self.tasks[
+                    task_id
+                ].status
+                == TaskStatus.COMPLETED.value
+            )
+            for task_id in ids
+        )
+
+    def dependency_failure(
+        self,
+        task: Task,
+    ) -> str | None:
+        for task_id in task.depends_on:
+            dependency = (
+                self.tasks.get(
+                    task_id
+                )
+            )
+
+            if dependency is None:
+                return (
+                    "Dépendance introuvable : "
+                    f"{task_id}"
+                )
+
+            if (
+                dependency.status
+                == TaskStatus.FAILED.value
+            ):
+                return (
+                    "Dépendance échouée : "
+                    f"{task_id}"
+                )
+
+            if (
+                dependency.status
+                == TaskStatus.CANCELLED.value
+            ):
+                return (
+                    "Dépendance annulée : "
+                    f"{task_id}"
+                )
+
         return None
-    def dependents_of(self,task_id): return [t for t in self.tasks.values() if task_id in t.depends_on]
-    def dependency_context(self,task):
-        return [{"task_id":d.id,"title":d.title,"worker":d.worker,"status":d.status,"result":d.result,"result_data":d.result_data} for i in task.depends_on if (d:=self.tasks.get(i))]
-    def format(self):
-        return "Aucune tâche." if not self.tasks else "\n".join(f"{t.id} | {t.status} | {t.worker} | {t.title}"+(f" | dépend de {','.join(t.depends_on)}" if t.depends_on else "") for t in self.list())
+
+    def dependents_of(
+        self,
+        task_id: str,
+    ) -> list[Task]:
+        return [
+            task
+            for task in self.tasks.values()
+            if task_id in task.depends_on
+        ]
+
+    def dependency_context(
+        self,
+        task: Task,
+    ) -> list[dict[str, Any]]:
+        context = []
+
+        for task_id in task.depends_on:
+            dependency = (
+                self.tasks.get(
+                    task_id
+                )
+            )
+
+            if dependency is None:
+                continue
+
+            context.append(
+                {
+                    "task_id": dependency.id,
+                    "title": dependency.title,
+                    "worker": dependency.worker,
+                    "status": dependency.status,
+                    "result": dependency.result,
+                    "result_data": dependency.result_data,
+                }
+            )
+
+        return context
+
+    def recover_interrupted(
+        self,
+        task_ids: list[str] | None = None,
+    ) -> list[str]:
+        """
+        Une tâche restée RUNNING dans tasks.json appartient
+        à un ancien processus.
+
+        On la remet dans un état exécutable au redémarrage.
+        """
+
+        selected = (
+            set(task_ids)
+            if task_ids is not None
+            else None
+        )
+
+        recovered: list[str] = []
+
+        with self.lock:
+            changed = False
+
+            for task in self.tasks.values():
+                if (
+                    selected is not None
+                    and task.id not in selected
+                ):
+                    continue
+
+                if (
+                    task.status
+                    != TaskStatus.RUNNING.value
+                ):
+                    continue
+
+                if (
+                    task.depends_on
+                    and not self.dependencies_satisfied_ids(
+                        task.depends_on
+                    )
+                ):
+                    task.status = (
+                        TaskStatus
+                        .WAITING_DEPENDENCY
+                        .value
+                    )
+                else:
+                    task.status = (
+                        TaskStatus.PENDING.value
+                    )
+
+                task.error = None
+                task.updated_at = (
+                    self._now()
+                )
+
+                recovered.append(
+                    task.id
+                )
+
+                changed = True
+
+            if changed:
+                self._save()
+
+        return recovered
+
+    def format(self) -> str:
+        if not self.tasks:
+            return "Aucune tâche."
+
+        lines = []
+
+        for task in self.list():
+            line = (
+                f"{task.id} | "
+                f"{task.status} | "
+                f"{task.worker} | "
+                f"{task.title}"
+            )
+
+            if task.depends_on:
+                line += (
+                    " | dépend de "
+                    + ",".join(
+                        task.depends_on
+                    )
+                )
+
+            lines.append(
+                line
+            )
+
+        return "\n".join(
+            lines
+        )

@@ -1,27 +1,54 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 
-from datetime import (
-    datetime,
-    timezone,
-)
-
-from agentos.config import (
-    DATA_DIR,
-)
-
-from agentos.storage import (
-    JsonStore,
-)
+from agentos.config import DATA_DIR
+from agentos.storage import JsonStore
 
 
 class Memory:
+    QUESTION_STARTERS = (
+        "quel ",
+        "quelle ",
+        "quels ",
+        "quelles ",
+        "qui ",
+        "que ",
+        "quoi ",
+        "où ",
+        "ou ",
+        "quand ",
+        "comment ",
+        "combien ",
+        "pourquoi ",
+        "est-ce ",
+        "est ce ",
+        "peux-tu ",
+        "peux tu ",
+        "pourrais-tu ",
+        "pourrais tu ",
+        "sais-tu ",
+        "sais tu ",
+        "tu sais ",
+        "tu te souviens ",
+        "rappelle-moi ",
+        "rappelle moi ",
+    )
 
-    def __init__(
-        self,
-    ) -> None:
+    EXPLICIT_PATTERNS = (
+        r"^\s*souviens-toi\s+que\s+",
+        r"^\s*souviens toi\s+que\s+",
+        r"^\s*retiens\s+que\s+",
+        r"^\s*mémorise\s+(?:que\s+)?",
+        r"^\s*memorise\s+(?:que\s+)?",
+        r"^\s*garde\s+en\s+mémoire\s+(?:que\s+)?",
+        r"^\s*garde\s+en\s+memoire\s+(?:que\s+)?",
+        r"^\s*à\s+l'avenir\s*[:,]?\s*",
+        r"^\s*a\s+l'avenir\s*[:,]?\s*",
+    )
 
+    def __init__(self) -> None:
         self.store = JsonStore(
             DATA_DIR / "memory.json",
             {
@@ -31,70 +58,187 @@ class Memory:
             },
         )
 
-        loaded = (
-            self.store.load()
-        )
-
-        # =====================================================
-        # SELF HEAL
-        # =====================================================
+        loaded = self.store.load()
 
         if not isinstance(
             loaded,
             dict,
         ):
-
             loaded = {}
 
         if not isinstance(
             loaded.get("session"),
             list,
         ):
-
             loaded["session"] = []
 
         if not isinstance(
             loaded.get("long_term"),
             list,
         ):
-
             loaded["long_term"] = []
 
         if not isinstance(
             loaded.get("profile"),
             list,
         ):
-
             loaded["profile"] = []
 
         self.data = loaded
 
-        self.store.save(
-            self.data
-        )
+        # Nettoie automatiquement les anciennes
+        # mémoires parasites au démarrage.
+        self._sanitize_long_term()
 
-    # =========================================================
-    # TIME
-    # =========================================================
+        self._save()
 
     @staticmethod
     def _now() -> str:
-
         return datetime.now(
             timezone.utc
         ).isoformat()
 
-    # =========================================================
-    # SAVE
-    # =========================================================
-
-    def _save(
-        self,
-    ) -> None:
-
+    def _save(self) -> None:
         self.store.save(
             self.data
         )
+
+    # =========================================================
+    # QUESTION DETECTION
+    # =========================================================
+
+    @classmethod
+    def _looks_like_question(
+        cls,
+        text: str,
+    ) -> bool:
+        clean = " ".join(
+            text.strip().split()
+        )
+
+        if not clean:
+            return False
+
+        lower = clean.lower()
+
+        if clean.endswith("?"):
+            return True
+
+        return any(
+            lower.startswith(
+                starter
+            )
+            for starter
+            in cls.QUESTION_STARTERS
+        )
+
+    # =========================================================
+    # EXPLICIT MEMORY NORMALIZATION
+    # =========================================================
+
+    @classmethod
+    def _normalize_explicit_memory(
+        cls,
+        text: str,
+    ) -> str:
+        clean = " ".join(
+            text.strip().split()
+        )
+
+        for pattern in (
+            cls.EXPLICIT_PATTERNS
+        ):
+            cleaned = re.sub(
+                pattern,
+                "",
+                clean,
+                count=1,
+                flags=re.IGNORECASE,
+            ).strip()
+
+            if cleaned != clean:
+                return cleaned
+
+        return clean
+
+    # =========================================================
+    # LONG TERM SELF HEAL
+    # =========================================================
+
+    def _sanitize_long_term(
+        self,
+    ) -> None:
+        cleaned_items = []
+        seen = set()
+
+        for item in (
+            self.data["long_term"]
+        ):
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            content = str(
+                item.get(
+                    "content",
+                    "",
+                )
+            ).strip()
+
+            if not content:
+                continue
+
+            # Une question ne doit jamais
+            # devenir un souvenir.
+            if self._looks_like_question(
+                content
+            ):
+                continue
+
+            kind = str(
+                item.get(
+                    "kind",
+                    "memory",
+                )
+            )
+
+            # Les anciennes mémoires explicites
+            # sont converties en vrais faits.
+            if kind == "explicit":
+                content = (
+                    self._normalize_explicit_memory(
+                        content
+                    )
+                )
+
+            if not content:
+                continue
+
+            key = content.lower()
+
+            if key in seen:
+                continue
+
+            seen.add(
+                key
+            )
+
+            cleaned_items.append(
+                {
+                    "kind": kind,
+                    "content": content,
+                    "at": item.get(
+                        "at",
+                        self._now(),
+                    ),
+                }
+            )
+
+        self.data[
+            "long_term"
+        ] = cleaned_items[-100:]
 
     # =========================================================
     # SESSION
@@ -105,11 +249,11 @@ class Memory:
         role: str,
         content: str,
     ) -> None:
-
-        content = content.strip()
+        content = (
+            content.strip()
+        )
 
         if not content:
-
             return
 
         self.data[
@@ -122,13 +266,13 @@ class Memory:
             }
         )
 
-        # On garde davantage de contexte
-        # qu'en V3.3.
         self.data[
             "session"
-        ] = self.data[
-            "session"
-        ][-40:]
+        ] = (
+            self.data[
+                "session"
+            ][-40:]
+        )
 
         self._save()
 
@@ -142,11 +286,16 @@ class Memory:
         *,
         kind: str = "memory",
     ) -> None:
-
-        text = text.strip()
+        text = " ".join(
+            text.strip().split()
+        )
 
         if not text:
+            return
 
+        if self._looks_like_question(
+            text
+        ):
             return
 
         existing = [
@@ -166,8 +315,10 @@ class Memory:
             )
         ]
 
-        if text.lower() in existing:
-
+        if (
+            text.lower()
+            in existing
+        ):
             return
 
         self.data[
@@ -182,9 +333,11 @@ class Memory:
 
         self.data[
             "long_term"
-        ] = self.data[
-            "long_term"
-        ][-100:]
+        ] = (
+            self.data[
+                "long_term"
+            ][-100:]
+        )
 
         self._save()
 
@@ -199,20 +352,15 @@ class Memory:
         value: str,
         source: str,
     ) -> None:
-
         key = key.strip()
-
         value = value.strip()
 
         if (
             not key
             or not value
         ):
-
             return
 
-        # Une clé de profil remplace
-        # son ancienne valeur.
         remaining = []
 
         for item in (
@@ -220,19 +368,16 @@ class Memory:
                 "profile"
             ]
         ):
-
             if not isinstance(
                 item,
                 dict,
             ):
-
                 continue
 
             if (
                 item.get("key")
                 == key
             ):
-
                 continue
 
             remaining.append(
@@ -262,50 +407,58 @@ class Memory:
         self,
         text: str,
     ) -> bool:
-
-        markers = (
-            "souviens-toi",
-            "souviens toi",
-            "retiens que",
-            "mémorise",
-            "memorise",
-            "garde en mémoire",
-            "garde en memoire",
-            "à l'avenir",
-            "a l'avenir",
-        )
-
-        lower = (
-            text.lower()
-        )
-
-        if any(
-            marker in lower
-            for marker
-            in markers
+        if self._looks_like_question(
+            text
         ):
+            return False
 
-            self.remember(
-                text,
-                kind="explicit",
-            )
+        clean = " ".join(
+            text.strip().split()
+        )
 
-            return True
+        for pattern in (
+            self.EXPLICIT_PATTERNS
+        ):
+            if re.search(
+                pattern,
+                clean,
+                flags=re.IGNORECASE,
+            ):
+                fact = (
+                    self._normalize_explicit_memory(
+                        clean
+                    )
+                )
+
+                if fact:
+                    self.remember(
+                        fact,
+                        kind="explicit",
+                    )
+
+                return True
 
         return False
 
     # =========================================================
-    # SIMPLE PROFILE EXTRACTION
+    # AUTOMATIC PROFILE EXTRACTION
     # =========================================================
 
     def _extract_profile(
         self,
         text: str,
     ) -> None:
-
         clean = " ".join(
             text.strip().split()
         )
+
+        if (
+            not clean
+            or self._looks_like_question(
+                clean
+            )
+        ):
+            return
 
         # -----------------------------------------------------
         # NAME
@@ -313,21 +466,22 @@ class Memory:
 
         match = re.search(
             (
-                r"\b(?:je m'appelle|"
+                r"^(?:je m'appelle|"
                 r"je m’appelle|"
                 r"mon prénom est|"
                 r"mon prenom est)\s+"
-                r"([A-Za-zÀ-ÿ'-]{2,40})"
+                r"([A-Za-zÀ-ÿ'-]{2,40})\b"
             ),
             clean,
             flags=re.IGNORECASE,
         )
 
         if match:
-
             self.remember_profile(
                 key="first_name",
-                value=match.group(1),
+                value=(
+                    match.group(1)
+                ),
                 source=clean,
             )
 
@@ -337,9 +491,10 @@ class Memory:
 
         match = re.search(
             (
-                r"\b(?:j'habite|"
+                r"^(?:j'habite|"
                 r"j’habite|"
-                r"je vis)\s+(?:à|a)\s+"
+                r"je vis)\s+"
+                r"(?:à|a)\s+"
                 r"([^,.!?]{2,80})"
             ),
             clean,
@@ -347,7 +502,6 @@ class Memory:
         )
 
         if match:
-
             self.remember_profile(
                 key="location",
                 value=(
@@ -358,38 +512,34 @@ class Memory:
             )
 
         # -----------------------------------------------------
-        # PREFERENCE
+        # PREFERENCES
         # -----------------------------------------------------
 
-        match = re.search(
-            (
-                r"\b(?:je préfère|"
-                r"je prefere)\s+"
-                r"(.{2,120})"
-            ),
+        if re.search(
+            r"^je préfère\s+.{2,120}$",
             clean,
             flags=re.IGNORECASE,
-        )
-
-        if match:
-
+        ):
             self.remember(
                 clean,
                 kind="preference",
             )
 
-        # -----------------------------------------------------
-        # LIKES
-        # -----------------------------------------------------
-
-        match = re.search(
-            r"\bj'aime\s+(.{2,120})",
+        if re.search(
+            r"^je prefere\s+.{2,120}$",
             clean,
             flags=re.IGNORECASE,
-        )
+        ):
+            self.remember(
+                clean,
+                kind="preference",
+            )
 
-        if match:
-
+        if re.search(
+            r"^j'aime\s+.{2,120}$",
+            clean,
+            flags=re.IGNORECASE,
+        ):
             self.remember(
                 clean,
                 kind="preference",
@@ -403,6 +553,13 @@ class Memory:
         self,
         text: str,
     ) -> None:
+        # Important :
+        # on ne mémorise jamais automatiquement
+        # une question.
+        if self._looks_like_question(
+            text
+        ):
+            return
 
         self._explicit_memory(
             text
@@ -420,7 +577,6 @@ class Memory:
         self,
         limit: int = 12,
     ) -> str:
-
         lines = []
 
         for item in (
@@ -428,12 +584,10 @@ class Memory:
                 "session"
             ][-limit:]
         ):
-
             if not isinstance(
                 item,
                 dict,
             ):
-
                 continue
 
             role = str(
@@ -466,12 +620,15 @@ class Memory:
     def profile_context(
         self,
     ) -> str:
-
         lines = []
 
         labels = {
-            "first_name": "Prénom",
-            "location": "Lieu de vie",
+            "first_name": (
+                "Prénom"
+            ),
+            "location": (
+                "Lieu de vie"
+            ),
         }
 
         for item in (
@@ -479,12 +636,10 @@ class Memory:
                 "profile"
             ]
         ):
-
             if not isinstance(
                 item,
                 dict,
             ):
-
                 continue
 
             key = str(
@@ -502,14 +657,11 @@ class Memory:
             )
 
             if not value:
-
                 continue
 
-            label = (
-                labels.get(
-                    key,
-                    key,
-                )
+            label = labels.get(
+                key,
+                key,
             )
 
             lines.append(
@@ -529,7 +681,6 @@ class Memory:
         self,
         limit: int = 20,
     ) -> str:
-
         lines = []
 
         for item in (
@@ -537,12 +688,10 @@ class Memory:
                 "long_term"
             ][-limit:]
         ):
-
             if not isinstance(
                 item,
                 dict,
             ):
-
                 continue
 
             content = str(
@@ -553,7 +702,6 @@ class Memory:
             )
 
             if content:
-
                 lines.append(
                     f"- {content}"
                 )
@@ -570,7 +718,6 @@ class Memory:
     def context(
         self,
     ) -> str:
-
         return (
             "PROFIL UTILISATEUR:\n"
             + self.profile_context()
@@ -582,12 +729,7 @@ class Memory:
             + self.session_context()
         )
 
-    # =========================================================
-    # DISPLAY
-    # =========================================================
-
     def format(
         self,
     ) -> str:
-
         return self.context()

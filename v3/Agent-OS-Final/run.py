@@ -8,19 +8,266 @@ from agentos.manager import (
 )
 
 
+def recover_active_work(
+    manager: Manager,
+) -> dict:
+    # =========================================================
+    # 1. EXISTING TASK RECOVERY
+    # =========================================================
+    #
+    # On reprend d'abord les tâches qui existaient
+    # AVANT ce processus.
+    #
+    # Important : cette étape doit arriver avant
+    # recover_planning_missions(), car celle-ci
+    # peut créer de nouvelles tâches RUNNING.
+
+    active_before = (
+        manager.missions.active(
+            manager.tasks
+        )
+    )
+
+    existing_task_ids = []
+
+    for mission in (
+        active_before
+    ):
+        if mission.task_ids:
+            existing_task_ids.extend(
+                mission.task_ids
+            )
+
+    task_recovery = (
+        manager.engine.recover(
+            existing_task_ids
+        )
+    )
+
+    # =========================================================
+    # 2. INTERRUPTED PLANNING RECOVERY
+    # =========================================================
+
+    planning_recovery = (
+        manager.orchestrator
+        .recover_planning_missions()
+    )
+
+    # =========================================================
+    # 3. FINAL STATE
+    # =========================================================
+
+    active_after = (
+        manager.missions.active(
+            manager.tasks
+        )
+    )
+
+    return {
+        "task_recovery": (
+            task_recovery
+        ),
+        "planning_recovery": (
+            planning_recovery
+        ),
+        "active_missions": [
+            mission.human_id
+            for mission
+            in active_after
+        ],
+    }
+
+
+def print_recovery_report(
+    recovery: dict,
+) -> None:
+    task_recovery = (
+        recovery.get(
+            "task_recovery",
+            {},
+        )
+        or {}
+    )
+
+    planning_recovery = (
+        recovery.get(
+            "planning_recovery",
+            {},
+        )
+        or {}
+    )
+
+    interrupted = (
+        task_recovery.get(
+            "interrupted",
+            [],
+        )
+        or []
+    )
+
+    submitted = (
+        task_recovery.get(
+            "submitted",
+            [],
+        )
+        or []
+    )
+
+    waiting_approval = (
+        task_recovery.get(
+            "waiting_approval",
+            [],
+        )
+        or []
+    )
+
+    resumed_planning = (
+        planning_recovery.get(
+            "resumed",
+            [],
+        )
+        or []
+    )
+
+    duplicates = (
+        planning_recovery.get(
+            "cancelled_duplicates",
+            [],
+        )
+        or []
+    )
+
+    failed_planning = (
+        planning_recovery.get(
+            "failed",
+            [],
+        )
+        or []
+    )
+
+    active_missions = (
+        recovery.get(
+            "active_missions",
+            [],
+        )
+        or []
+    )
+
+    if not (
+        interrupted
+        or submitted
+        or waiting_approval
+        or resumed_planning
+        or duplicates
+        or failed_planning
+    ):
+        return
+
+    print(
+        "[REPRISE V3.6]"
+    )
+
+    if active_missions:
+        print(
+            (
+                "Missions actives "
+                "après reprise : "
+            )
+            + ", ".join(
+                active_missions
+            )
+        )
+
+    if interrupted:
+        print(
+            (
+                "Tâches interrompues "
+                "restaurées : "
+            )
+            + str(
+                len(interrupted)
+            )
+        )
+
+    if submitted:
+        print(
+            (
+                "Tâches relancées "
+                "automatiquement : "
+            )
+            + str(
+                len(submitted)
+            )
+        )
+
+    if waiting_approval:
+        print(
+            (
+                "Tâches toujours en attente "
+                "d'autorisation : "
+            )
+            + str(
+                len(
+                    waiting_approval
+                )
+            )
+        )
+
+    if resumed_planning:
+        print(
+            (
+                "Missions reprises depuis "
+                "la planification : "
+            )
+            + ", ".join(
+                resumed_planning
+            )
+        )
+
+    for item in (
+        duplicates
+    ):
+        print(
+            (
+                "Mission interrompue annulée "
+                "comme doublon : "
+            )
+            + item["mission"]
+            + " -> "
+            + item["duplicate_of"]
+        )
+
+    for item in (
+        failed_planning
+    ):
+        print(
+            (
+                "Échec de reprise "
+                "de planification : "
+            )
+            + item["mission"]
+            + " ("
+            + item["error"]
+            + ")"
+        )
+
+    print()
+
+
 def notification_loop(
     manager: Manager,
     stop_event: threading.Event,
 ) -> None:
-
-    while not stop_event.is_set():
-
+    while not (
+        stop_event.is_set()
+    ):
         notifications = (
             manager.drain_notifications()
         )
 
-        for notification in notifications:
-
+        for notification in (
+            notifications
+        ):
             print()
 
             print(
@@ -40,13 +287,15 @@ def notification_loop(
 
 
 def main() -> None:
-
     print(
         "=" * 64
     )
 
     print(
-        "AGENT-OS V3.5 — MULTI-MISSIONS"
+        (
+            "AGENT-OS V3.6 — "
+            "RESILIENT MISSIONS"
+        )
     )
 
     print(
@@ -61,6 +310,16 @@ def main() -> None:
 
     manager = (
         Manager()
+    )
+
+    recovery = (
+        recover_active_work(
+            manager
+        )
+    )
+
+    print_recovery_report(
+        recovery
     )
 
     stop_notifications = (
@@ -86,17 +345,13 @@ def main() -> None:
     notification_thread.start()
 
     try:
-
         while True:
-
             try:
-
                 message = input(
                     "TOI > "
                 )
 
             except EOFError:
-
                 break
 
             if (
@@ -105,7 +360,6 @@ def main() -> None:
                 .lower()
                 == "quit"
             ):
-
                 break
 
             response = (
@@ -115,7 +369,6 @@ def main() -> None:
             )
 
             if response:
-
                 print()
 
                 print(
@@ -129,13 +382,11 @@ def main() -> None:
                 print()
 
     except KeyboardInterrupt:
-
         print(
             "\nArrêt demandé."
         )
 
     finally:
-
         stop_notifications.set()
 
         notification_thread.join(
@@ -152,7 +403,6 @@ def main() -> None:
             manager
             .drain_notifications()
         ):
-
             print()
 
             print(
@@ -165,5 +415,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-
     main()

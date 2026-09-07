@@ -33,7 +33,6 @@ from agentos.tasks import (
 
 @dataclass
 class Mission:
-
     id: str
     title: str
     description: str
@@ -63,14 +62,12 @@ class Mission:
     def to_dict(
         self,
     ) -> dict[str, Any]:
-
         return asdict(
             self
         )
 
 
 class MissionManager:
-
     HUMAN_ID_RE = re.compile(
         r"^M-(\d+)$",
         flags=re.IGNORECASE,
@@ -79,7 +76,6 @@ class MissionManager:
     def __init__(
         self,
     ) -> None:
-
         self.store = JsonStore(
             DATA_DIR / "missions.json",
             [],
@@ -98,13 +94,8 @@ class MissionManager:
 
         self._repair_human_ids()
 
-    # =========================================================
-    # INTERNAL
-    # =========================================================
-
     @staticmethod
     def _now() -> str:
-
         return datetime.now(
             timezone.utc
         ).isoformat()
@@ -112,7 +103,6 @@ class MissionManager:
     def _load(
         self,
     ) -> None:
-
         loaded = (
             self.store.load()
         )
@@ -121,26 +111,21 @@ class MissionManager:
             loaded,
             list,
         ):
-
             loaded = []
 
         for item in loaded:
-
             if not isinstance(
                 item,
                 dict,
             ):
-
                 continue
 
             try:
-
                 mission = Mission(
                     **item
                 )
 
             except TypeError:
-
                 continue
 
             self.missions[
@@ -150,7 +135,6 @@ class MissionManager:
     def _save(
         self,
     ) -> None:
-
         self.store.save(
             [
                 mission.to_dict()
@@ -160,19 +144,17 @@ class MissionManager:
         )
 
     # =========================================================
-    # HUMAN IDS
+    # HUMAN IDs
     # =========================================================
 
     def _used_human_numbers(
         self,
     ) -> set[int]:
-
         numbers = set()
 
         for mission in (
             self.missions.values()
         ):
-
             match = (
                 self.HUMAN_ID_RE.match(
                     mission.human_id
@@ -181,7 +163,6 @@ class MissionManager:
             )
 
             if match:
-
                 numbers.add(
                     int(
                         match.group(1)
@@ -193,7 +174,6 @@ class MissionManager:
     def _next_human_id(
         self,
     ) -> str:
-
         used = (
             self._used_human_numbers()
         )
@@ -201,7 +181,6 @@ class MissionManager:
         number = 1
 
         while number in used:
-
             number += 1
 
         return (
@@ -211,9 +190,7 @@ class MissionManager:
     def _repair_human_ids(
         self,
     ) -> None:
-
         changed = False
-
         used = set()
 
         missions = sorted(
@@ -224,7 +201,6 @@ class MissionManager:
         )
 
         for mission in missions:
-
             current = (
                 mission.human_id
                 or ""
@@ -237,13 +213,11 @@ class MissionManager:
             )
 
             if match:
-
                 number = int(
                     match.group(1)
                 )
 
                 if number not in used:
-
                     used.add(
                         number
                     )
@@ -253,7 +227,6 @@ class MissionManager:
             number = 1
 
             while number in used:
-
                 number += 1
 
             mission.human_id = (
@@ -267,7 +240,6 @@ class MissionManager:
             changed = True
 
         if changed:
-
             self._save()
 
     # =========================================================
@@ -285,9 +257,7 @@ class MissionManager:
         ]
         | None = None,
     ) -> Mission:
-
         with self.lock:
-
             now = self._now()
 
             mission = Mission(
@@ -326,7 +296,6 @@ class MissionManager:
         self,
         mission_id: str,
     ) -> Mission | None:
-
         return self.missions.get(
             mission_id
         )
@@ -335,7 +304,6 @@ class MissionManager:
         self,
         human_id: str,
     ) -> Mission | None:
-
         wanted = (
             human_id
             .strip()
@@ -345,13 +313,11 @@ class MissionManager:
         for mission in (
             self.missions.values()
         ):
-
             if (
                 mission.human_id
                 .upper()
                 == wanted
             ):
-
                 return mission
 
         return None
@@ -360,13 +326,11 @@ class MissionManager:
         self,
         reference: str,
     ) -> Mission | None:
-
         reference = (
             reference.strip()
         )
 
         if not reference:
-
             return None
 
         direct = (
@@ -376,7 +340,6 @@ class MissionManager:
         )
 
         if direct is not None:
-
             return direct
 
         return (
@@ -388,7 +351,6 @@ class MissionManager:
     def list(
         self,
     ) -> list[Mission]:
-
         return sorted(
             self.missions.values(),
             key=lambda mission: (
@@ -410,9 +372,7 @@ class MissionManager:
         ],
         task_ids: list[str],
     ) -> Mission:
-
         with self.lock:
-
             mission = (
                 self.missions[
                     mission_id
@@ -440,6 +400,58 @@ class MissionManager:
             return mission
 
     # =========================================================
+    # MANUAL STATUS
+    # =========================================================
+
+    def set_status(
+        self,
+        mission_id: str,
+        status: str,
+        *,
+        metadata_patch: dict[
+            str,
+            Any,
+        ]
+        | None = None,
+    ) -> Mission:
+        with self.lock:
+            mission = (
+                self.missions[
+                    mission_id
+                ]
+            )
+
+            mission.status = (
+                status
+            )
+
+            if metadata_patch:
+                metadata = dict(
+                    mission.metadata
+                    if isinstance(
+                        mission.metadata,
+                        dict,
+                    )
+                    else {}
+                )
+
+                metadata.update(
+                    metadata_patch
+                )
+
+                mission.metadata = (
+                    metadata
+                )
+
+            mission.updated_at = (
+                self._now()
+            )
+
+            self._save()
+
+            return mission
+
+    # =========================================================
     # STATUS
     # =========================================================
 
@@ -448,9 +460,12 @@ class MissionManager:
         mission: Mission,
         tasks: TaskManager,
     ) -> Mission:
-
+        # Une mission planning sans tâche
+        # est volontairement laissée planning.
+        # La récupération V3.6 est responsable
+        # de décider s'il faut la reprendre
+        # ou l'annuler comme doublon.
         if not mission.task_ids:
-
             return mission
 
         linked = [
@@ -469,7 +484,6 @@ class MissionManager:
         ]
 
         if not linked:
-
             status = "failed"
 
         elif any(
@@ -478,7 +492,6 @@ class MissionManager:
             for task
             in linked
         ):
-
             status = "failed"
 
         elif any(
@@ -487,7 +500,6 @@ class MissionManager:
             for task
             in linked
         ):
-
             status = "cancelled"
 
         elif all(
@@ -496,7 +508,6 @@ class MissionManager:
             for task
             in linked
         ):
-
             status = "completed"
 
         elif any(
@@ -505,7 +516,6 @@ class MissionManager:
             for task
             in linked
         ):
-
             status = (
                 "waiting_approval"
             )
@@ -516,20 +526,16 @@ class MissionManager:
             for task
             in linked
         ):
-
             status = "running"
 
         else:
-
             status = "queued"
 
         if (
             mission.status
             != status
         ):
-
             with self.lock:
-
                 mission.status = (
                     status
                 )
@@ -554,7 +560,6 @@ class MissionManager:
         int,
         int,
     ]:
-
         completed = 0
 
         total = len(
@@ -564,7 +569,6 @@ class MissionManager:
         for task_id in (
             mission.task_ids
         ):
-
             task = tasks.get(
                 task_id
             )
@@ -574,7 +578,6 @@ class MissionManager:
                 and task.status
                 == TaskStatus.COMPLETED.value
             ):
-
                 completed += 1
 
         return (
@@ -590,11 +593,11 @@ class MissionManager:
         self,
         tasks: TaskManager,
     ) -> list[Mission]:
-
         result = []
 
-        for mission in self.list():
-
+        for mission in (
+            self.list()
+        ):
             self.refresh(
                 mission,
                 tasks,
@@ -606,7 +609,6 @@ class MissionManager:
                 "running",
                 "waiting_approval",
             }:
-
                 result.append(
                     mission
                 )
@@ -621,17 +623,16 @@ class MissionManager:
         self,
         tasks: TaskManager,
     ) -> str:
-
         if not self.missions:
-
             return (
                 "Aucune mission."
             )
 
         sections = []
 
-        for mission in self.list():
-
+        for mission in (
+            self.list()
+        ):
             self.refresh(
                 mission,
                 tasks,
@@ -657,13 +658,11 @@ class MissionManager:
                 mission.task_ids,
                 1,
             ):
-
                 task = tasks.get(
                     task_id
                 )
 
                 if task is None:
-
                     lines.append(
                         (
                             f"  {index}. "
