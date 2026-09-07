@@ -449,6 +449,36 @@ class MissionManager:
             self._save()
             return mission
 
+    @staticmethod
+    def _has_rejected_approval(
+        linked,
+    ) -> bool:
+        for task in linked:
+            data = (
+                task.result_data
+                if isinstance(
+                    task.result_data,
+                    dict,
+                )
+                else {}
+            )
+
+            if (
+                data.get(
+                    "approval_status"
+                )
+                == "rejected"
+            ):
+                return True
+
+            if (
+                task.error
+                == "approval_rejected"
+            ):
+                return True
+
+        return False
+
     def refresh(
         self,
         mission: Mission,
@@ -496,6 +526,11 @@ class MissionManager:
 
             if not linked:
                 status = "failed"
+
+            elif self._has_rejected_approval(
+                linked
+            ):
+                status = "rejected"
 
             elif any(
                 task.status

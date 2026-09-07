@@ -9,7 +9,7 @@ def main() -> None:
     )
 
     print(
-        "AGENT-OS V3.9 — LOCAL API"
+        "AGENT-OS V4.0 — CONTROL CENTER"
     )
 
     print(
@@ -17,17 +17,24 @@ def main() -> None:
     )
 
     print(
-        "\nAPI : http://127.0.0.1:8765"
+        "\nInterface : http://127.0.0.1:8765"
     )
 
     print(
-        "Docs : http://127.0.0.1:8765/docs"
+        "API       : http://127.0.0.1:8765/api"
     )
 
     print(
-        "\nNe lance pas run.py en parallèle "
-        "pendant ce test : les deux processus "
-        "utiliseraient les mêmes missions.\n"
+        "Docs      : http://127.0.0.1:8765/docs"
+    )
+
+    print(
+        "\nUn seul processus Agent-OS doit utiliser "
+        "les fichiers de données à la fois."
+    )
+
+    print(
+        "Ne lance pas run.py en parallèle.\n"
     )
 
     uvicorn.run(
@@ -36,6 +43,7 @@ def main() -> None:
         port=8765,
         reload=False,
         log_level="info",
+        access_log=False,
     )
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import (
     FastAPI,
@@ -13,6 +14,14 @@ from fastapi.middleware.cors import (
     CORSMiddleware,
 )
 
+from fastapi.responses import (
+    FileResponse,
+)
+
+from fastapi.staticfiles import (
+    StaticFiles,
+)
+
 from pydantic import (
     BaseModel,
     Field,
@@ -20,6 +29,21 @@ from pydantic import (
 
 from agentos.runtime import (
     AgentOSRuntime,
+)
+
+
+APP_VERSION = "4.0"
+
+PROJECT_DIR = (
+    Path(__file__)
+    .resolve()
+    .parent
+    .parent
+)
+
+WEB_DIR = (
+    PROJECT_DIR
+    / "web"
 )
 
 
@@ -46,12 +70,12 @@ async def lifespan(
 app = FastAPI(
     title="Agent-OS API",
     description=(
-        "API locale d'Agent-OS. "
-        "Elle expose le Manager, les missions, "
+        "Backend local d'Agent-OS V4.0. "
+        "Il expose le Manager, les missions, "
         "les agents, les approbations, la mémoire "
-        "et le Mission Control."
+        "et le Mission Control au Control Center web."
     ),
-    version="3.9",
+    version=APP_VERSION,
     docs_url="/docs",
     redoc_url=None,
     lifespan=lifespan,
@@ -64,10 +88,21 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:8765",
+        "http://127.0.0.1:8765",
     ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.mount(
+    "/static",
+    StaticFiles(
+        directory=WEB_DIR,
+        check_dir=True,
+    ),
+    name="static",
 )
 
 
@@ -121,11 +156,45 @@ def raise_http_error(
     raise exc
 
 
+def public_status(
+    runtime: AgentOSRuntime,
+) -> dict:
+    status = dict(
+        runtime.status()
+    )
+
+    core_version = (
+        status.get(
+            "version",
+            "3.9",
+        )
+    )
+
+    status[
+        "core_version"
+    ] = core_version
+
+    status[
+        "version"
+    ] = APP_VERSION
+
+    return status
+
+
 @app.get("/")
-def root() -> dict:
+def control_center() -> FileResponse:
+    return FileResponse(
+        WEB_DIR
+        / "index.html"
+    )
+
+
+@app.get("/api")
+def api_root() -> dict:
     return {
         "name": "Agent-OS",
-        "version": "3.9",
+        "version": APP_VERSION,
+        "interface": "/",
         "api": "/api",
         "docs": "/docs",
         "binding": "localhost",
@@ -140,12 +209,17 @@ def health(
         request
     )
 
-    status = runtime.status()
+    status = public_status(
+        runtime
+    )
 
     return {
         "ok": True,
         "version": (
             status["version"]
+        ),
+        "core_version": (
+            status["core_version"]
         ),
         "started_at": (
             status["started_at"]
@@ -157,9 +231,37 @@ def health(
 def status(
     request: Request,
 ) -> dict:
-    return runtime_from(
+    return public_status(
+        runtime_from(
+            request
+        )
+    )
+
+
+@app.get("/api/dashboard")
+def dashboard(
+    request: Request,
+) -> dict:
+    runtime = runtime_from(
         request
-    ).status()
+    )
+
+    return {
+        "status": (
+            public_status(
+                runtime
+            )
+        ),
+        "agents": (
+            runtime.agents()
+        ),
+        "missions": (
+            runtime.missions()
+        ),
+        "approvals": (
+            runtime.approvals()
+        ),
+    }
 
 
 @app.get("/api/agents")
@@ -183,9 +285,21 @@ def chat(
     )
 
     try:
-        return runtime.handle_message(
+        result = runtime.handle_message(
             body.message
         )
+
+        result = dict(
+            result
+        )
+
+        result[
+            "status"
+        ] = public_status(
+            runtime
+        )
+
+        return result
 
     except Exception as exc:
         raise_http_error(

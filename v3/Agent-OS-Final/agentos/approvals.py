@@ -300,6 +300,61 @@ class ApprovalManager:
         )
 
     # =========================================================
+    # REJECT HELPERS
+    # =========================================================
+
+    def _cancel_dependents(
+        self,
+        task_id: str,
+    ) -> list[str]:
+
+        cancelled = []
+
+        for dependent in (
+            self.tasks.dependents_of(
+                task_id
+            )
+        ):
+
+            if dependent.status not in {
+                TaskStatus.COMPLETED.value,
+                TaskStatus.FAILED.value,
+                TaskStatus.CANCELLED.value,
+            }:
+
+                self.tasks.update(
+                    dependent.id,
+                    status=(
+                        TaskStatus
+                        .CANCELLED
+                        .value
+                    ),
+                    result=(
+                        "Étape annulée : la modification "
+                        "précédente a été refusée."
+                    ),
+                    error=(
+                        "approval_rejected_dependency"
+                    ),
+                )
+
+                cancelled.append(
+                    dependent.id
+                )
+
+            cancelled.extend(
+                self._cancel_dependents(
+                    dependent.id
+                )
+            )
+
+        return list(
+            dict.fromkeys(
+                cancelled
+            )
+        )
+
+    # =========================================================
     # REJECT
     # =========================================================
 
@@ -332,6 +387,10 @@ class ApprovalManager:
             "approval_status"
         ] = "rejected"
 
+        data[
+            "approval_required_files"
+        ] = []
+
         self.tasks.update(
             task.id,
             status=(
@@ -351,7 +410,7 @@ class ApprovalManager:
             error="approval_rejected",
         )
 
-        self.resume(
+        self._cancel_dependents(
             task.id
         )
 
