@@ -24,8 +24,16 @@ from agentos.missions import (
     MissionManager,
 )
 
+from agentos.orchestrator import (
+    Orchestrator,
+)
+
 from agentos.permissions import (
     PermissionEngine,
+)
+
+from agentos.planner import (
+    Planner,
 )
 
 from agentos.project_files import (
@@ -54,32 +62,21 @@ from agentos.workers import (
 
 class Manager:
 
-    MISSION_SPLIT_PATTERN = (
-        r"\s*(?:,|\bet\b)?\s*"
-        r"(?:ensuite|puis|enfin|"
-        r"après|apres)"
-        r"\s+"
-    )
-
-    MISSION_START_MARKERS = (
-        "d'abord",
-        "d’abord",
-        "commence par",
-        "premièrement",
-        "premierement",
+    TASK_ID_RE = re.compile(
+        r"(task_[A-Za-z0-9]+)"
     )
 
     def __init__(
         self,
     ) -> None:
 
-        self.llm = (
-            LLM()
-        )
+        # =====================================================
+        # CORE
+        # =====================================================
 
-        self.memory = (
-            Memory()
-        )
+        self.llm = LLM()
+
+        self.memory = Memory()
 
         self.permissions = (
             PermissionEngine()
@@ -89,9 +86,17 @@ class Manager:
             TaskManager()
         )
 
+        self.missions = (
+            MissionManager()
+        )
+
         self.router = (
             Router()
         )
+
+        # =====================================================
+        # TOOLS
+        # =====================================================
 
         self.files = (
             ProjectFiles(
@@ -105,11 +110,9 @@ class Manager:
             )
         )
 
-        self.missions = (
-            MissionManager(
-                self.tasks
-            )
-        )
+        # =====================================================
+        # NOTIFICATIONS
+        # =====================================================
 
         self._lock = (
             threading.RLock()
@@ -119,14 +122,14 @@ class Manager:
             str
         ] = []
 
-        self._mission_terminal_cache: dict[
+        self._mission_status_cache: dict[
             str,
             str,
         ] = {}
 
-        # ====================================================
+        # =====================================================
         # ENGINE
-        # ====================================================
+        # =====================================================
 
         self.engine = (
             WorkerEngine(
@@ -164,9 +167,9 @@ class Manager:
             )
         )
 
-        # ====================================================
+        # =====================================================
         # APPROVALS
-        # ====================================================
+        # =====================================================
 
         self.approvals = (
             ApprovalManager(
@@ -177,11 +180,34 @@ class Manager:
             )
         )
 
-    # ========================================================
-    # NOTIFICATIONS
-    # ========================================================
+        # =====================================================
+        # PLANNER
+        # =====================================================
 
-    def notify(
+        self.planner = (
+            Planner(
+                self.llm
+            )
+        )
+
+        # =====================================================
+        # ORCHESTRATOR
+        # =====================================================
+
+        self.orchestrator = (
+            Orchestrator(
+                planner=self.planner,
+                missions=self.missions,
+                tasks=self.tasks,
+                engine=self.engine,
+            )
+        )
+
+    # =========================================================
+    # RAW NOTIFICATION
+    # =========================================================
+
+    def _append_notification(
         self,
         text: str,
     ) -> None:
@@ -192,137 +218,614 @@ class Manager:
                 text
             )
 
-        self._refresh_missions()
+    # =========================================================
+    # TASK FROM EVENT
+    # =========================================================
+
+    def _task_from_event(
+        self,
+        text: str,
+    ):
+
+        match = self.TASK_ID_RE.search(
+            text
+        )
+
+        if match is None:
+
+            return None
+
+        return self.tasks.get(
+            match.group(1)
+        )
+
+    # =========================================================
+    # HUMAN NOTIFICATION
+    # =========================================================
+
+    def _humanize_task_event(
+        self,
+        text: str,
+    ) -> str | None:
+
+        task = self._task_from_event(
+            text
+        )
+
+        if task is None:
+
+            return text
+
+        # -----------------------------------------------------
+        # APPROVAL REQUIRED
+        # -----------------------------------------------------
+
+        if (
+            "attend ton approbation"
+            in text
+        ):
+
+            files = (
+                task.result_data.get(
+                    "approval_required_files",
+                    [],
+                )
+                if isinstance(
+                    task.result_data,
+                    dict,
+                )
+                else []
+            )
+
+            if files:
+
+                file_text = "\n".join(
+                    f"- {path}"
+                    for path
+                    in files
+                )
+
+                return (
+                    "La modification est prête.\n\n"
+                    "J'ai besoin de ton autorisation "
+                    "pour modifier :\n"
+                    f"{file_text}\n\n"
+                    "Tu valides ?"
+                )
+
+            return (
+                "Une action est prête "
+                "et nécessite ton autorisation.\n\n"
+                "Tu valides ?"
+            )
+
+        # -----------------------------------------------------
+        # FAILED
+        # -----------------------------------------------------
+
+        if text.startswith(
+            "✗"
+        ):
+
+            detail = (
+                task.error
+                or task.result
+                or "erreur inconnue"
+            )
+
+            return (
+                "Une étape de la mission "
+                "a échoué.\n\n"
+                f"Étape : {task.title}\n"
+                f"Détail : {detail}"
+            )
+
+        # -----------------------------------------------------
+        # COMPLETED
+        # -----------------------------------------------------
+
+        if text.startswith(
+            "✓"
+        ):
+
+            if (
+                task.worker
+                == "researcher"
+            ):
+
+                return (
+                    "La recherche est terminée. "
+                    "Je poursuis avec l'étape suivante."
+                )
+
+            if (
+                task.worker
+                == "developer"
+            ):
+
+                return (
+                    "Le travail de développement "
+                    "est terminé. "
+                    "Je passe aux vérifications."
+                )
+
+            if (
+                task.worker
+                == "tester"
+            ):
+
+                return (
+                    "Les vérifications sont terminées."
+                )
+
+            if (
+                task.worker
+                == "ai_worker"
+            ):
+
+                return (
+                    "L'étape d'analyse est terminée."
+                )
+
+        return None
+
+    # =========================================================
+    # MISSION LOOKUP
+    # =========================================================
+
+    def _mission_for_task(
+        self,
+        task,
+    ):
+
+        if task is None:
+
+            return None
+
+        metadata = (
+            task.metadata
+            if isinstance(
+                task.metadata,
+                dict,
+            )
+            else {}
+        )
+
+        mission_id = (
+            metadata.get(
+                "mission_id"
+            )
+        )
+
+        if not mission_id:
+
+            return None
+
+        return self.missions.get(
+            mission_id
+        )
+
+    # =========================================================
+    # MISSION SUMMARY
+    # =========================================================
+
+    def _mission_summary(
+        self,
+        mission,
+    ) -> str:
+
+        modified_files = []
+        created_files = []
+        tested_files = []
+
+        for task_id in (
+            mission.task_ids
+        ):
+
+            task = self.tasks.get(
+                task_id
+            )
+
+            if task is None:
+
+                continue
+
+            data = (
+                task.result_data
+                if isinstance(
+                    task.result_data,
+                    dict,
+                )
+                else {}
+            )
+
+            for path in (
+                data.get(
+                    "modified_files",
+                    [],
+                )
+                or []
+            ):
+
+                if path not in (
+                    modified_files
+                ):
+
+                    modified_files.append(
+                        path
+                    )
+
+            for path in (
+                data.get(
+                    "created_files",
+                    [],
+                )
+                or []
+            ):
+
+                if path not in (
+                    created_files
+                ):
+
+                    created_files.append(
+                        path
+                    )
+
+            if (
+                task.worker
+                == "tester"
+            ):
+
+                for path in (
+                    data.get(
+                        "targets",
+                        [],
+                    )
+                    or []
+                ):
+
+                    if path not in (
+                        tested_files
+                    ):
+
+                        tested_files.append(
+                            path
+                        )
+
+        lines = [
+            "Mission terminée.",
+            "",
+            mission.title,
+        ]
+
+        if modified_files:
+
+            lines.append(
+                ""
+            )
+
+            lines.append(
+                "Fichier(s) modifié(s) :"
+            )
+
+            for path in (
+                modified_files
+            ):
+
+                lines.append(
+                    f"- {path}"
+                )
+
+        if created_files:
+
+            lines.append(
+                ""
+            )
+
+            lines.append(
+                "Fichier(s) créé(s) :"
+            )
+
+            for path in (
+                created_files
+            ):
+
+                lines.append(
+                    f"- {path}"
+                )
+
+        if tested_files:
+
+            lines.append(
+                ""
+            )
+
+            lines.append(
+                "Vérification effectuée sur :"
+            )
+
+            for path in (
+                tested_files
+            ):
+
+                lines.append(
+                    f"- {path}"
+                )
+
+        return "\n".join(
+            lines
+        )
+
+    # =========================================================
+    # REFRESH MISSION
+    # =========================================================
+
+    def _refresh_mission(
+        self,
+        mission,
+    ) -> None:
+
+        if mission is None:
+
+            return
+
+        previous = (
+            self._mission_status_cache.get(
+                mission.id
+            )
+        )
+
+        self.missions.refresh(
+            mission,
+            self.tasks,
+        )
+
+        current = (
+            mission.status
+        )
+
+        self._mission_status_cache[
+            mission.id
+        ] = current
+
+        if (
+            previous == current
+        ):
+
+            return
+
+        # -----------------------------------------------------
+        # COMPLETED
+        # -----------------------------------------------------
+
+        if current == "completed":
+
+            self._append_notification(
+                self._mission_summary(
+                    mission
+                )
+            )
+
+            return
+
+        # -----------------------------------------------------
+        # FAILED
+        # -----------------------------------------------------
+
+        if current == "failed":
+
+            self._append_notification(
+                (
+                    "La mission n'a pas pu "
+                    "être terminée correctement.\n\n"
+                    f"{mission.title}"
+                )
+            )
+
+            return
+
+        # -----------------------------------------------------
+        # CANCELLED
+        # -----------------------------------------------------
+
+        if current == "cancelled":
+
+            self._append_notification(
+                (
+                    "La mission a été annulée.\n\n"
+                    f"{mission.title}"
+                )
+            )
+
+    # =========================================================
+    # NOTIFY
+    # =========================================================
+
+    def notify(
+        self,
+        text: str,
+    ) -> None:
+
+        task = self._task_from_event(
+            text
+        )
+
+        human = (
+            self._humanize_task_event(
+                text
+            )
+        )
+
+        if human:
+
+            self._append_notification(
+                human
+            )
+
+        mission = (
+            self._mission_for_task(
+                task
+            )
+        )
+
+        self._refresh_mission(
+            mission
+        )
+
+    # =========================================================
+    # DRAIN
+    # =========================================================
 
     def drain_notifications(
         self,
     ) -> list[str]:
 
-        self._refresh_missions()
-
         with self._lock:
 
-            values = list(
+            notifications = list(
                 self._notifications
             )
 
             self._notifications.clear()
 
-            return values
+            return notifications
 
-    # ========================================================
-    # MISSION NOTIFICATION
-    # ========================================================
-
-    def _refresh_missions(
-        self,
-    ) -> None:
-
-        self.missions.refresh_all()
-
-        for mission in (
-            self.missions.missions.values()
-        ):
-
-            previous = (
-                self._mission_terminal_cache
-                .get(
-                    mission.id
-                )
-            )
-
-            current = (
-                mission.status
-            )
-
-            if (
-                current
-                not in {
-                    "completed",
-                    "failed",
-                    "cancelled",
-                }
-            ):
-
-                continue
-
-            if (
-                previous
-                == current
-            ):
-
-                continue
-
-            self._mission_terminal_cache[
-                mission.id
-            ] = current
-
-            if (
-                current
-                == "completed"
-            ):
-
-                notification = (
-                    f"✓ Mission {mission.id} "
-                    "terminée."
-                )
-
-            elif (
-                current
-                == "cancelled"
-            ):
-
-                notification = (
-                    f"✗ Mission {mission.id} "
-                    "annulée."
-                )
-
-            else:
-
-                notification = (
-                    f"✗ Mission {mission.id} "
-                    f"échouée : "
-                    f"{mission.error or 'erreur inconnue'}"
-                )
-
-            with self._lock:
-
-                self._notifications.append(
-                    notification
-                )
-
-    # ========================================================
-    # TITLES
-    # ========================================================
+    # =========================================================
+    # NATURAL COMMAND
+    # =========================================================
 
     @staticmethod
-    def _task_title(
+    def _normalize_command(
         message: str,
     ) -> str:
 
-        clean = " ".join(
+        return " ".join(
             message
+            .lower()
             .strip()
+            .replace(
+                "!",
+                "",
+            )
+            .replace(
+                "?",
+                "",
+            )
+            .replace(
+                ".",
+                "",
+            )
+            .replace(
+                ",",
+                "",
+            )
             .split()
         )
 
-        if (
-            len(clean)
-            <= 90
-        ):
+    @classmethod
+    def _looks_like_approval(
+        cls,
+        message: str,
+    ) -> bool:
 
-            return clean
-
-        return (
-            clean[
-                :87
-            ].rstrip()
-            + "..."
+        value = (
+            cls._normalize_command(
+                message
+            )
         )
 
-    # ========================================================
+        exact = {
+            "oui",
+            "yes",
+            "y",
+            "ok",
+            "okay",
+            "go",
+            "vas y",
+            "je valide",
+            "validé",
+            "valide",
+            "c'est bon",
+            "cest bon",
+            "d'accord",
+            "daccord",
+            "tu peux",
+            "autorise",
+            "j'autorise",
+            "jautorise",
+            "approuve",
+            "je confirme",
+        }
+
+        if value in exact:
+
+            return True
+
+        prefixes = (
+            "ok pour ",
+            "okay pour ",
+            "je valide ",
+            "je confirme ",
+            "tu peux modifier",
+            "tu peux créer",
+            "tu peux creer",
+            "tu peux faire",
+            "vas y ",
+            "j'autorise ",
+            "jautorise ",
+        )
+
+        return value.startswith(
+            prefixes
+        )
+
+    @classmethod
+    def _looks_like_rejection(
+        cls,
+        message: str,
+    ) -> bool:
+
+        value = (
+            cls._normalize_command(
+                message
+            )
+        )
+
+        exact = {
+            "non",
+            "no",
+            "n",
+            "refuse",
+            "je refuse",
+            "annule",
+            "annuler",
+            "stop",
+            "laisse tomber",
+            "ne fais pas",
+            "ne modifie pas",
+        }
+
+        if value in exact:
+
+            return True
+
+        prefixes = (
+            "non ",
+            "je refuse ",
+            "annule ",
+            "ne modifie pas ",
+            "ne crée pas ",
+            "ne cree pas ",
+            "ne fais pas ",
+        )
+
+        return value.startswith(
+            prefixes
+        )
+
+    # =========================================================
     # CONVERSATION
-    # ========================================================
+    # =========================================================
 
     def _conversation(
         self,
@@ -332,20 +835,27 @@ class Manager:
         try:
 
             return self.llm.chat(
-                (
-                    "Tu es le Manager "
-                    "d'Agent-OS, interlocuteur "
-                    "principal de l'utilisateur.\n\n"
-                    "CONTEXTE MÉMOIRE:\n"
-                    f"{self.memory.context()}\n\n"
-                    "MESSAGE COURANT:\n"
-                    f"{message}\n\n"
-                    "Réponds naturellement "
-                    "en français. "
-                    "Ne prétends pas qu'un worker "
-                    "a travaillé si aucune tâche "
-                    "ne l'a fait."
-                )
+                f"""
+Tu es le Manager d'Agent-OS.
+
+Tu es l'interlocuteur principal de l'utilisateur.
+
+Tu peux discuter normalement avec lui pendant que
+d'autres workers travaillent en parallèle.
+
+Ne prétends jamais qu'une mission est terminée
+si le système ne l'a pas réellement terminée.
+
+CONTEXTE MÉMOIRE :
+
+{self.memory.context()}
+
+MESSAGE COURANT :
+
+{message}
+
+Réponds naturellement en français.
+"""
             )
 
         except LLMError as exc:
@@ -355,361 +865,152 @@ class Manager:
                 f"{exc}"
             )
 
-    # ========================================================
-    # MISSION DETECTION
-    # ========================================================
+    # =========================================================
+    # STATUS
+    # =========================================================
 
-    @classmethod
-    def _looks_like_mission(
-        cls,
-        message: str,
-    ) -> bool:
-
-        lower = (
-            message.lower()
-        )
-
-        if re.search(
-            cls.MISSION_SPLIT_PATTERN,
-            lower,
-            flags=re.IGNORECASE,
-        ):
-
-            return True
-
-        if any(
-            marker in lower
-            for marker
-            in cls.MISSION_START_MARKERS
-        ):
-
-            return True
-
-        return False
-
-    # ========================================================
-    # NORMALIZE FIRST STEP
-    # ========================================================
-
-    @classmethod
-    def _clean_first_step(
-        cls,
-        text: str,
+    def _status(
+        self,
     ) -> str:
 
-        value = (
-            text.strip()
-        )
+        active = 0
 
-        lower = (
-            value.lower()
-        )
-
-        for marker in (
-            cls.MISSION_START_MARKERS
+        for mission in (
+            self.missions.list()
         ):
 
-            if lower.startswith(
-                marker
-            ):
-
-                value = (
-                    value[
-                        len(marker):
-                    ]
-                    .lstrip(
-                        " ,:-"
-                    )
-                )
-
-                break
-
-        return value.strip()
-
-    # ========================================================
-    # SPLIT MISSION
-    # ========================================================
-
-    @classmethod
-    def _split_mission(
-        cls,
-        message: str,
-    ) -> list[str]:
-
-        parts = re.split(
-            cls.MISSION_SPLIT_PATTERN,
-            message.strip(),
-            flags=re.IGNORECASE,
-        )
-
-        cleaned = []
-
-        for index, part in enumerate(
-            parts
-        ):
-
-            value = (
-                part
-                .strip()
-                .strip(
-                    " ,.;"
-                )
+            self.missions.refresh(
+                mission,
+                self.tasks,
             )
 
-            if (
-                index == 0
-            ):
+            if mission.status in {
+                "planning",
+                "queued",
+                "running",
+                "waiting_approval",
+            }:
 
-                value = (
-                    cls._clean_first_step(
-                        value
-                    )
+                active += 1
+
+        return (
+            "Équipe disponible : "
+            + ", ".join(
+                self.engine.workers
+            )
+            + "\n"
+            + "Travaux actuellement exécutés : "
+            + str(
+                len(
+                    self.engine.running
                 )
-
-            if value:
-
-                cleaned.append(
-                    value
+            )
+            + "\n"
+            + "Missions actives : "
+            + str(active)
+            + "\n"
+            + "Décisions en attente : "
+            + str(
+                len(
+                    self.approvals.pending()
                 )
+            )
+        )
 
-        return cleaned
+    # =========================================================
+    # APPROVAL RESPONSE
+    # =========================================================
 
-    # ========================================================
-    # CREATE SIMPLE TASK
-    # ========================================================
-
-    def _create_task(
+    def _approve(
         self,
-        *,
-        message: str,
-        depends_on: list[str]
-        | None = None,
-        mission_id: str
-        | None = None,
-        step_index: int
-        | None = None,
-    ):
+    ) -> str:
 
-        route = (
-            self.router.route(
-                message
-            )
+        pending = (
+            self.approvals.pending()
         )
-
-        if (
-            route.kind
-            == "conversation"
-        ):
-
-            worker = (
-                "ai_worker"
-            )
-
-        else:
-
-            worker = (
-                route.worker
-                or "ai_worker"
-            )
-
-        metadata = {
-            "original_message": (
-                message
-            ),
-            "router_reason": (
-                route.reason
-            ),
-        }
-
-        if mission_id:
-
-            metadata[
-                "mission_id"
-            ] = mission_id
-
-        if step_index is not None:
-
-            metadata[
-                "mission_step"
-            ] = step_index
 
         task = (
-            self.tasks.create(
-                title=(
-                    self._task_title(
-                        message
-                    )
-                ),
-                description=message,
-                worker=worker,
-                depends_on=(
-                    depends_on
-                    or []
-                ),
-                metadata=metadata,
-            )
+            pending[-1]
+            if pending
+            else None
         )
 
-        return task
-
-    # ========================================================
-    # CREATE MISSION
-    # ========================================================
-
-    def _create_mission(
-        self,
-        message: str,
-    ) -> str:
-
-        steps = (
-            self._split_mission(
-                message
-            )
+        response = (
+            self.approvals
+            .approve_latest()
         )
+
+        if task is None:
+
+            return response
 
         if (
-            len(steps)
-            < 2
+            "autor"
+            not in response.lower()
+            and "termin"
+            not in response.lower()
         ):
 
-            # Faux positif :
-            # revient au mode simple.
-            task = (
-                self._create_task(
-                    message=message
-                )
-            )
-
-            self.engine.submit(
-                task.id
-            )
-
-            return (
-                f"Tâche créée : {task.id}\n"
-                f"Worker : {task.worker}\n"
-                f"Statut : "
-                f"{self.tasks.get(task.id).status}"
-            )
-
-        # ----------------------------------------------------
-        # Mission créée avant les tâches
-        # ----------------------------------------------------
+            return response
 
         mission = (
-            self.missions.create(
-                title=(
-                    self._task_title(
-                        message
-                    )
-                ),
-                original_message=message,
-                task_ids=[],
-                metadata={
-                    "steps": steps,
-                },
+            self._mission_for_task(
+                task
             )
         )
 
-        task_ids = []
-
-        previous_task_id = (
-            None
+        self._refresh_mission(
+            mission
         )
 
-        for index, step in enumerate(
-            steps,
-            start=1,
-        ):
+        return (
+            "C'est validé.\n\n"
+            "La modification a été appliquée. "
+            "Je poursuis automatiquement "
+            "avec la suite de la mission."
+        )
 
-            dependencies = []
+    def _reject(
+        self,
+    ) -> str:
 
-            if (
-                previous_task_id
-                is not None
-            ):
+        pending = (
+            self.approvals.pending()
+        )
 
-                dependencies.append(
-                    previous_task_id
-                )
+        task = (
+            pending[-1]
+            if pending
+            else None
+        )
 
-            task = (
-                self._create_task(
-                    message=step,
-                    depends_on=dependencies,
-                    mission_id=mission.id,
-                    step_index=index,
-                )
+        response = (
+            self.approvals
+            .reject_latest()
+        )
+
+        if task is None:
+
+            return response
+
+        mission = (
+            self._mission_for_task(
+                task
             )
-
-            task_ids.append(
-                task.id
-            )
-
-            previous_task_id = (
-                task.id
-            )
-
-        mission.task_ids = (
-            task_ids
         )
 
-        mission.updated_at = (
-            self.missions._now()
+        self._refresh_mission(
+            mission
         )
 
-        self.missions._save()
-
-        # ----------------------------------------------------
-        # On lance seulement la première tâche.
-        # Les suivantes seront réveillées automatiquement.
-        # ----------------------------------------------------
-
-        self.engine.submit(
-            task_ids[0]
+        return (
+            "D'accord. "
+            "Je n'applique pas cette modification."
         )
 
-        self.missions.refresh(
-            mission.id
-        )
-
-        lines = [
-            (
-                f"Mission créée : "
-                f"{mission.id}"
-            ),
-            (
-                f"Étapes : "
-                f"{len(task_ids)}"
-            ),
-        ]
-
-        for index, task_id in enumerate(
-            task_ids,
-            start=1,
-        ):
-
-            task = (
-                self.tasks.get(
-                    task_id
-                )
-            )
-
-            lines.append(
-                (
-                    f"{index}. "
-                    f"{task.worker} | "
-                    f"{task.status} | "
-                    f"{task.title}"
-                )
-            )
-
-        return "\n".join(
-            lines
-        )
-
-    # ========================================================
+    # =========================================================
     # HANDLE
-    # ========================================================
+    # =========================================================
 
     def handle(
         self,
@@ -720,7 +1021,7 @@ class Manager:
             message.strip()
         )
 
-        cmd = (
+        command = (
             value.lower()
         )
 
@@ -728,87 +1029,61 @@ class Manager:
 
             return ""
 
-        # ====================================================
+        # =====================================================
         # COMMANDS
-        # ====================================================
+        # =====================================================
 
-        if (
-            cmd
-            == "tasks"
-        ):
+        if command == "tasks":
 
-            return (
-                self.tasks.format()
-            )
+            return self.tasks.format()
 
-        if (
-            cmd
-            == "missions"
-        ):
+        if command == "missions":
 
             return (
-                self.missions.format()
+                self.missions.format(
+                    self.tasks
+                )
             )
 
-        if (
-            cmd
-            == "approvals"
-        ):
+        if command == "approvals":
 
             return (
                 self.approvals.format()
             )
 
+        if command == "memory":
+
+            return self.memory.format()
+
+        if command == "status":
+
+            return self._status()
+
+        # =====================================================
+        # NATURAL APPROVAL
+        # =====================================================
+
         if (
-            cmd
-            == "memory"
+            self.approvals.pending()
         ):
 
-            return (
-                self.memory.format()
-            )
+            if self._looks_like_approval(
+                value
+            ):
 
-        if (
-            cmd
-            == "status"
-        ):
+                return self._approve()
 
-            self._refresh_missions()
+            if self._looks_like_rejection(
+                value
+            ):
 
-            running_missions = len(
-                [
-                    mission
-                    for mission
-                    in self.missions
-                    .missions
-                    .values()
-                    if (
-                        mission.status
-                        not in {
-                            "completed",
-                            "failed",
-                            "cancelled",
-                        }
-                    )
-                ]
-            )
+                return self._reject()
 
-            return (
-                "Workers : "
-                f"{', '.join(self.engine.workers)}\n"
-                "Tâches en cours : "
-                f"{len(self.engine.running)}\n"
-                "Missions actives : "
-                f"{running_missions}\n"
-                "Approbations : "
-                f"{len(self.approvals.pending())}"
-            )
+        # =====================================================
+        # EXACT APPROVAL
+        # =====================================================
 
-        # ====================================================
-        # APPROVAL
-        # ====================================================
-
-        if cmd in {
+        if command in {
             "oui",
             "yes",
             "y",
@@ -816,16 +1091,9 @@ class Manager:
             "autorise",
         }:
 
-            response = (
-                self.approvals
-                .approve_latest()
-            )
+            return self._approve()
 
-            self._refresh_missions()
-
-            return response
-
-        if cmd in {
+        if command in {
             "non",
             "no",
             "n",
@@ -833,18 +1101,11 @@ class Manager:
             "refuse",
         }:
 
-            response = (
-                self.approvals
-                .reject_latest()
-            )
+            return self._reject()
 
-            self._refresh_missions()
-
-            return response
-
-        # ====================================================
+        # =====================================================
         # MEMORY
-        # ====================================================
+        # =====================================================
 
         self.memory.add_session(
             "user",
@@ -855,31 +1116,17 @@ class Manager:
             value
         )
 
-        # ====================================================
-        # MISSION
-        # ====================================================
+        # =====================================================
+        # ROUTING
+        # =====================================================
 
-        if (
-            self._looks_like_mission(
-                value
-            )
-        ):
-
-            return (
-                self._create_mission(
-                    value
-                )
-            )
-
-        # ====================================================
-        # SIMPLE ROUTING
-        # ====================================================
-
-        route = (
-            self.router.route(
-                value
-            )
+        route = self.router.route(
+            value
         )
+
+        # =====================================================
+        # CONVERSATION
+        # =====================================================
 
         if (
             route.kind
@@ -899,26 +1146,45 @@ class Manager:
 
             return answer
 
-        task = (
-            self._create_task(
-                message=value
+        # =====================================================
+        # MISSION
+        # =====================================================
+
+        mission = (
+            self.orchestrator
+            .create_mission(
+                message=value,
+                initial_worker=(
+                    route.worker
+                    or "ai_worker"
+                ),
+                router_reason=(
+                    route.reason
+                ),
             )
         )
 
-        self.engine.submit(
-            task.id
-        )
+        if mission is None:
+
+            return (
+                "Je n'ai pas pu "
+                "créer la mission."
+            )
+
+        self._mission_status_cache[
+            mission.id
+        ] = mission.status
 
         return (
-            f"Tâche créée : {task.id}\n"
-            f"Worker : {task.worker}\n"
-            f"Statut : "
-            f"{self.tasks.get(task.id).status}"
+            self.orchestrator
+            .format_created(
+                mission
+            )
         )
 
-    # ========================================================
+    # =========================================================
     # SHUTDOWN
-    # ========================================================
+    # =========================================================
 
     def shutdown(
         self,

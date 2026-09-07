@@ -1,124 +1,61 @@
 from __future__ import annotations
 
+import threading
 import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from typing import Any
 
-from dataclasses import (
-    asdict,
-    dataclass,
-    field,
-)
-
-from datetime import (
-    datetime,
-    timezone,
-)
-
-from typing import (
-    Any,
-)
-
-from agentos.config import (
-    DATA_DIR,
-)
-
-from agentos.storage import (
-    JsonStore,
-)
-
-from agentos.tasks import (
-    TaskManager,
-    TaskStatus,
-)
+from agentos.config import DATA_DIR
+from agentos.storage import JsonStore
+from agentos.tasks import TaskManager, TaskStatus
 
 
 @dataclass
 class Mission:
-
     id: str
-
     title: str
-
-    original_message: str
-
+    description: str
+    status: str
     created_at: str
-
     updated_at: str
 
-    task_ids: list[str] = field(
-        default_factory=list
-    )
+    task_ids: list[str] = field(default_factory=list)
+    plan: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    status: str = "pending"
-
-    result: str | None = None
-
-    error: str | None = None
-
-    metadata: dict[str, Any] = field(
-        default_factory=dict
-    )
-
-    def to_dict(
-        self,
-    ) -> dict[str, Any]:
-
-        return asdict(
-            self
-        )
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class MissionManager:
 
-    TERMINAL = {
-        "completed",
-        "failed",
-        "cancelled",
-    }
-
-    def __init__(
-        self,
-        tasks: TaskManager,
-    ) -> None:
-
-        self.tasks = tasks
+    def __init__(self) -> None:
 
         self.store = JsonStore(
             DATA_DIR / "missions.json",
             [],
         )
 
-        self.missions: dict[
-            str,
-            Mission,
-        ] = {}
+        self.lock = threading.RLock()
+
+        self.missions: dict[str, Mission] = {}
 
         self._load()
 
-    # ========================================================
-    # TIME
-    # ========================================================
+    # =========================================================
+    # INTERNAL
+    # =========================================================
 
     @staticmethod
-    def _now(
-    ) -> str:
-
+    def _now() -> str:
         return datetime.now(
             timezone.utc
         ).isoformat()
 
-    # ========================================================
-    # STORAGE
-    # ========================================================
+    def _load(self) -> None:
 
-    def _load(
-        self,
-    ) -> None:
-
-        self.missions = {}
-
-        for item in (
-            self.store.load()
-        ):
+        for item in self.store.load():
 
             try:
 
@@ -126,17 +63,15 @@ class MissionManager:
                     **item
                 )
 
+                self.missions[
+                    mission.id
+                ] = mission
+
             except TypeError:
 
-                continue
+                pass
 
-            self.missions[
-                mission.id
-            ] = mission
-
-    def _save(
-        self,
-    ) -> None:
+    def _save(self) -> None:
 
         self.store.save(
             [
@@ -146,129 +81,96 @@ class MissionManager:
             ]
         )
 
-    # ========================================================
+    # =========================================================
     # CREATE
-    # ========================================================
+    # =========================================================
 
     def create(
         self,
         *,
         title: str,
-        original_message: str,
-        task_ids: list[str],
-        metadata: dict[str, Any]
-        | None = None,
+        description: str,
+        metadata: dict[str, Any] | None = None,
     ) -> Mission:
 
-        now = (
-            self._now()
-        )
+        with self.lock:
 
-        mission = Mission(
-            id=(
-                "mission_"
-                + uuid.uuid4().hex[
-                    :12
-                ]
-            ),
-            title=title,
-            original_message=(
-                original_message
-            ),
-            created_at=now,
-            updated_at=now,
-            task_ids=list(
-                task_ids
-            ),
-            status="pending",
-            metadata=(
-                metadata
-                or {}
-            ),
-        )
+            now = self._now()
 
-        self.missions[
-            mission.id
-        ] = mission
+            mission = Mission(
+                id=(
+                    "mission_"
+                    + uuid.uuid4().hex[:10]
+                ),
+                title=title,
+                description=description,
+                status="planning",
+                created_at=now,
+                updated_at=now,
+                metadata=metadata or {},
+            )
 
-        self._save()
+            self.missions[
+                mission.id
+            ] = mission
 
-        return mission
+            self._save()
 
-    # ========================================================
-    # READ
-    # ========================================================
+            return mission
+
+    # =========================================================
+    # ACCESS
+    # =========================================================
 
     def get(
         self,
         mission_id: str,
     ) -> Mission | None:
 
-        return (
-            self.missions.get(
-                mission_id
-            )
+        return self.missions.get(
+            mission_id
         )
 
     def list(
         self,
     ) -> list[Mission]:
 
-        self.refresh_all()
-
         return sorted(
             self.missions.values(),
-            key=lambda mission:
-            mission.created_at,
+            key=lambda mission: (
+                mission.created_at
+            ),
             reverse=True,
         )
 
-    # ========================================================
-    # STATUS
-    # ========================================================
+    # =========================================================
+    # PLAN
+    # =========================================================
 
-    def refresh(
+    def attach_plan(
         self,
         mission_id: str,
-    ) -> Mission | None:
+        *,
+        plan: list[dict[str, Any]],
+        task_ids: list[str],
+    ) -> Mission:
 
-        mission = (
-            self.get(
+        with self.lock:
+
+            mission = self.missions[
                 mission_id
+            ]
+
+            mission.plan = plan
+
+            mission.task_ids = (
+                task_ids
             )
-        )
-
-        if mission is None:
-
-            return None
-
-        task_objects = []
-
-        for task_id in (
-            mission.task_ids
-        ):
-
-            task = (
-                self.tasks.get(
-                    task_id
-                )
-            )
-
-            if task is not None:
-
-                task_objects.append(
-                    task
-                )
-
-        if not task_objects:
 
             mission.status = (
-                "failed"
-            )
-
-            mission.error = (
-                "La mission ne contient "
-                "aucune tâche valide."
+                "running"
+                if task_ids
+                else "failed"
             )
 
             mission.updated_at = (
@@ -279,232 +181,139 @@ class MissionManager:
 
             return mission
 
-        statuses = [
-            task.status
-            for task
-            in task_objects
+    # =========================================================
+    # STATUS
+    # =========================================================
+
+    def refresh(
+        self,
+        mission: Mission,
+        tasks: TaskManager,
+    ) -> Mission:
+
+        if not mission.task_ids:
+
+            return mission
+
+        linked = [
+            tasks.get(task_id)
+            for task_id
+            in mission.task_ids
         ]
 
-        # ----------------------------------------------------
-        # FAILED
-        # ----------------------------------------------------
+        linked = [
+            task
+            for task
+            in linked
+            if task is not None
+        ]
 
-        if any(
-            status
-            == TaskStatus.FAILED.value
-            for status
-            in statuses
-        ):
+        if not linked:
 
-            mission.status = (
-                "failed"
-            )
-
-            failed = next(
-                (
-                    task
-                    for task
-                    in task_objects
-                    if (
-                        task.status
-                        == TaskStatus
-                        .FAILED
-                        .value
-                    )
-                ),
-                None,
-            )
-
-            mission.error = (
-                failed.error
-                if failed
-                else (
-                    "Une tâche "
-                    "de la mission a échoué."
-                )
-            )
-
-        # ----------------------------------------------------
-        # CANCELLED
-        # ----------------------------------------------------
+            status = "failed"
 
         elif any(
-            status
-            == TaskStatus.CANCELLED.value
-            for status
-            in statuses
+            task.status
+            == TaskStatus.FAILED.value
+            for task
+            in linked
         ):
 
-            mission.status = (
-                "cancelled"
-            )
+            status = "failed"
 
-            mission.error = (
-                "Une tâche de la mission "
-                "a été annulée."
-            )
+        elif any(
+            task.status
+            == TaskStatus.CANCELLED.value
+            for task
+            in linked
+        ):
 
-        # ----------------------------------------------------
-        # COMPLETED
-        # ----------------------------------------------------
+            status = "cancelled"
 
         elif all(
-            status
+            task.status
             == TaskStatus.COMPLETED.value
-            for status
-            in statuses
+            for task
+            in linked
         ):
 
-            mission.status = (
-                "completed"
-            )
-
-            final_task = (
-                task_objects[-1]
-            )
-
-            mission.result = (
-                final_task.result
-            )
-
-            mission.error = None
-
-        # ----------------------------------------------------
-        # WAITING APPROVAL
-        # ----------------------------------------------------
+            status = "completed"
 
         elif any(
-            status
-            == TaskStatus
-            .WAITING_APPROVAL
-            .value
-            for status
-            in statuses
+            task.status
+            == TaskStatus.WAITING_APPROVAL.value
+            for task
+            in linked
         ):
 
-            mission.status = (
+            status = (
                 "waiting_approval"
             )
 
-        # ----------------------------------------------------
-        # RUNNING
-        # ----------------------------------------------------
-
         elif any(
-            status
+            task.status
             == TaskStatus.RUNNING.value
-            for status
-            in statuses
+            for task
+            in linked
         ):
 
-            mission.status = (
-                "running"
-            )
-
-        # ----------------------------------------------------
-        # WAITING DEPENDENCY
-        # ----------------------------------------------------
-
-        elif any(
-            status
-            == TaskStatus
-            .WAITING_DEPENDENCY
-            .value
-            for status
-            in statuses
-        ):
-
-            mission.status = (
-                "running"
-            )
+            status = "running"
 
         else:
 
-            mission.status = (
-                "pending"
-            )
+            status = "queued"
 
-        mission.updated_at = (
-            self._now()
-        )
+        if mission.status != status:
 
-        self._save()
+            with self.lock:
+
+                mission.status = status
+
+                mission.updated_at = (
+                    self._now()
+                )
+
+                self._save()
 
         return mission
 
-    def refresh_all(
-        self,
-    ) -> None:
-
-        for mission_id in list(
-            self.missions
-        ):
-
-            self.refresh(
-                mission_id
-            )
-
-    # ========================================================
-    # TASK LOOKUP
-    # ========================================================
-
-    def mission_for_task(
-        self,
-        task_id: str,
-    ) -> Mission | None:
-
-        for mission in (
-            self.missions.values()
-        ):
-
-            if (
-                task_id
-                in mission.task_ids
-            ):
-
-                return mission
-
-        return None
-
-    # ========================================================
-    # FORMAT
-    # ========================================================
+    # =========================================================
+    # DISPLAY
+    # =========================================================
 
     def format(
         self,
+        tasks: TaskManager,
     ) -> str:
 
-        missions = (
-            self.list()
-        )
+        if not self.missions:
 
-        if not missions:
+            return "Aucune mission."
 
-            return (
-                "Aucune mission."
+        sections: list[str] = []
+
+        for mission in self.list():
+
+            self.refresh(
+                mission,
+                tasks,
             )
 
-        lines = []
-
-        for mission in missions:
-
-            lines.append(
+            lines = [
                 (
                     f"{mission.id} | "
                     f"{mission.status} | "
                     f"{mission.title}"
                 )
-            )
+            ]
 
             for index, task_id in enumerate(
                 mission.task_ids,
-                start=1,
+                1,
             ):
 
-                task = (
-                    self.tasks.get(
-                        task_id
-                    )
+                task = tasks.get(
+                    task_id
                 )
 
                 if task is None:
@@ -512,7 +321,8 @@ class MissionManager:
                     lines.append(
                         (
                             f"  {index}. "
-                            f"{task_id} | introuvable"
+                            f"{task_id} | "
+                            "introuvable"
                         )
                     )
 
@@ -521,13 +331,16 @@ class MissionManager:
                 lines.append(
                     (
                         f"  {index}. "
-                        f"{task.id} | "
                         f"{task.status} | "
                         f"{task.worker} | "
                         f"{task.title}"
                     )
                 )
 
-        return "\n".join(
-            lines
+            sections.append(
+                "\n".join(lines)
+            )
+
+        return "\n\n".join(
+            sections
         )
