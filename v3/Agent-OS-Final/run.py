@@ -42,6 +42,12 @@ def recover_active_work(
         .recover_planning_missions()
     )
 
+    repair_recovery = (
+        manager.orchestrator
+        .repair_loop
+        .recover_pending_repairs()
+    )
+
     active_after = (
         manager.missions.active(
             manager.tasks
@@ -54,6 +60,9 @@ def recover_active_work(
         ),
         "planning_recovery": (
             planning_recovery
+        ),
+        "repair_recovery": (
+            repair_recovery
         ),
         "active_missions": [
             mission.human_id
@@ -77,6 +86,14 @@ def print_recovery_report(
     planning_recovery = (
         recovery.get(
             "planning_recovery",
+            {},
+        )
+        or {}
+    )
+
+    repair_recovery = (
+        recovery.get(
+            "repair_recovery",
             {},
         )
         or {}
@@ -138,6 +155,30 @@ def print_recovery_report(
         or []
     )
 
+    restored_repairs = (
+        repair_recovery.get(
+            "restored",
+            [],
+        )
+        or []
+    )
+
+    exhausted_repairs = (
+        repair_recovery.get(
+            "exhausted",
+            [],
+        )
+        or []
+    )
+
+    failed_repairs = (
+        repair_recovery.get(
+            "failed",
+            [],
+        )
+        or []
+    )
+
     active_missions = (
         recovery.get(
             "active_missions",
@@ -154,11 +195,14 @@ def print_recovery_report(
         or resumed_planning
         or duplicates
         or failed_planning
+        or restored_repairs
+        or exhausted_repairs
+        or failed_repairs
     ):
         return
 
     print(
-        "[REPRISE V3.7]"
+        "[REPRISE V3.8]"
     )
 
     if active_missions:
@@ -229,6 +273,28 @@ def print_recovery_report(
             )
         )
 
+    if restored_repairs:
+        print(
+            (
+                "Boucles de correction "
+                "restaurées : "
+            )
+            + ", ".join(
+                restored_repairs
+            )
+        )
+
+    if exhausted_repairs:
+        print(
+            (
+                "Corrections automatiques "
+                "arrivées à leur limite : "
+            )
+            + str(
+                len(exhausted_repairs)
+            )
+        )
+
     for item in duplicates:
         print(
             (
@@ -247,6 +313,18 @@ def print_recovery_report(
                 "de planification : "
             )
             + item["mission"]
+            + " ("
+            + item["error"]
+            + ")"
+        )
+
+    for item in failed_repairs:
+        print(
+            (
+                "Échec de reprise "
+                "d'une correction : "
+            )
+            + item["task"]
             + " ("
             + item["error"]
             + ")"
@@ -294,8 +372,8 @@ def main() -> None:
 
     print(
         (
-            "AGENT-OS V3.7 — "
-            "MISSION CONTROL"
+            "AGENT-OS V3.8 — "
+            "AUTO-REPAIR LOOP"
         )
     )
 
@@ -308,6 +386,8 @@ def main() -> None:
         "status | missions | tasks | approvals | memory\n"
         "Contrôle : pause M-xxx | reprends M-xxx | "
         "annule M-xxx | retente M-xxx | quit\n"
+        "V3.8 : Tester NON VALIDÉ -> Developer corrige -> Tester reteste "
+        "(3 corrections max)\n"
     )
 
     manager = Manager()

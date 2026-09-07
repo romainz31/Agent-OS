@@ -15,6 +15,10 @@ from agentos.planner import (
     Planner,
 )
 
+from agentos.repair_loop import (
+    RepairLoop,
+)
+
 from agentos.tasks import (
     TaskManager,
     TaskStatus,
@@ -36,9 +40,15 @@ class Orchestrator:
         self.tasks = tasks
         self.engine = engine
 
-    # =========================================================
-    # TITLE
-    # =========================================================
+        self.repair_loop = RepairLoop(
+            missions=self.missions,
+            tasks=self.tasks,
+            engine=self.engine,
+        )
+
+        self.engine.set_repair_handler(
+            self.repair_loop.handle_non_validated
+        )
 
     @staticmethod
     def _mission_title(
@@ -69,10 +79,6 @@ class Orchestrator:
             .strip()
             .split()
         )
-
-    # =========================================================
-    # CREATE TASKS
-    # =========================================================
 
     def _create_tasks_from_plan(
         self,
@@ -137,9 +143,17 @@ class Orchestrator:
                     "original_message": (
                         message
                     ),
+                    "user_original_message": (
+                        message
+                    ),
                     "router_reason": (
                         router_reason
                     ),
+                    "auto_repair_enabled": (
+                        step.worker
+                        == "tester"
+                    ),
+                    "repair_attempt": 0,
                 },
             )
 
@@ -164,10 +178,6 @@ class Orchestrator:
             mission.id
         )
 
-    # =========================================================
-    # CREATE MISSION
-    # =========================================================
-
     def create_mission(
         self,
         *,
@@ -190,6 +200,7 @@ class Orchestrator:
                     "initial_worker": (
                         initial_worker
                     ),
+                    "auto_repair": True,
                 },
             )
         )
@@ -221,10 +232,6 @@ class Orchestrator:
 
             return None
 
-    # =========================================================
-    # MISSION TASK DISCOVERY
-    # =========================================================
-
     def _tasks_for_mission(
         self,
         mission_id: str,
@@ -255,10 +262,6 @@ class Orchestrator:
 
         return result
 
-    # =========================================================
-    # DUPLICATE DETECTION
-    # =========================================================
-
     def _duplicate_for_planning_mission(
         self,
         mission: Mission,
@@ -278,8 +281,6 @@ class Orchestrator:
             ):
                 continue
 
-            # On regarde uniquement
-            # les missions plus anciennes.
             if (
                 other.created_at
                 >= mission.created_at
@@ -309,19 +310,12 @@ class Orchestrator:
 
         return None
 
-    # =========================================================
-    # PLANNING RECOVERY
-    # =========================================================
-
     def recover_planning_missions(
         self,
     ) -> dict[str, Any]:
         resumed = []
-
         cancelled_duplicates = []
-
         cancelled_orphan_tasks = []
-
         failed = []
 
         planning = [
@@ -335,7 +329,6 @@ class Orchestrator:
             )
         ]
 
-        # Les plus anciennes d'abord.
         for mission in reversed(
             planning
         ):
@@ -346,8 +339,6 @@ class Orchestrator:
                 )
             )
 
-            # Exemple actuel :
-            # M-009 est la répétition de M-008.
             if duplicate is not None:
                 self.missions.set_status(
                     mission.id,
@@ -375,9 +366,6 @@ class Orchestrator:
 
                 continue
 
-            # Cas plus rare :
-            # le crash a eu lieu au milieu
-            # de la création des tâches.
             orphan_tasks = (
                 self._tasks_for_mission(
                     mission.id
@@ -494,10 +482,6 @@ class Orchestrator:
             ),
             "failed": failed,
         }
-
-    # =========================================================
-    # DISPLAY
-    # =========================================================
 
     def format_created(
         self,

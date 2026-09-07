@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any
+from typing import Any, Callable
 
 from agentos.config import MAX_WORKERS
 from agentos.tasks import TaskStatus
@@ -37,6 +37,11 @@ class WorkerEngine:
 
         self.lock = threading.RLock()
 
+        self.repair_handler: (
+            Callable[[str], dict[str, Any]]
+            | None
+        ) = None
+
     def register(
         self,
         worker,
@@ -44,6 +49,16 @@ class WorkerEngine:
         self.workers[
             worker.name
         ] = worker
+
+    def set_repair_handler(
+        self,
+        handler: Callable[
+            [str],
+            dict[str, Any],
+        ]
+        | None,
+    ) -> None:
+        self.repair_handler = handler
 
     def is_running(
         self,
@@ -54,6 +69,48 @@ class WorkerEngine:
                 task_id
                 in self.running
             )
+
+    @staticmethod
+    def _is_non_validated_test(
+        task,
+        result,
+    ) -> bool:
+        if task.worker != "tester":
+            return False
+
+        metadata = (
+            task.metadata
+            if isinstance(
+                task.metadata,
+                dict,
+            )
+            else {}
+        )
+
+        if not metadata.get(
+            "auto_repair_enabled",
+            False,
+        ):
+            return False
+
+        data = (
+            result.data
+            if isinstance(
+                result.data,
+                dict,
+            )
+            else {}
+        )
+
+        return (
+            str(
+                data.get(
+                    "verdict",
+                    "",
+                )
+            ).upper()
+            == "NON_VALIDÉ"
+        )
 
     def submit(
         self,
@@ -229,6 +286,188 @@ class WorkerEngine:
 
         return True
 
+    def _handle_non_validated_test(
+        self,
+        task_id: str,
+        result,
+    ) -> None:
+        data = dict(
+            result.data
+            if isinstance(
+                result.data,
+                dict,
+            )
+            else {}
+        )
+
+        self.tasks.update(
+            task_id,
+            status=(
+                TaskStatus
+                .COMPLETED
+                .value
+            ),
+            result=result.message,
+            result_data=data,
+            error=None,
+        )
+
+        if self.repair_handler is None:
+            self.tasks.update(
+                task_id,
+                status=(
+                    TaskStatus
+                    .FAILED
+                    .value
+                ),
+                error=(
+                    "Test non validé et aucun "
+                    "gestionnaire de correction "
+                    "n'est disponible."
+                ),
+            )
+
+            self.notifier(
+                f"✗ {task_id} : "
+                "test non validé"
+            )
+
+            self.resume_dependents(
+                task_id
+            )
+            return
+
+        try:
+            outcome = (
+                self.repair_handler(
+                    task_id
+                )
+                or {}
+            )
+
+        except Exception as exc:
+            outcome = {
+                "scheduled": False,
+                "reason": str(exc),
+            }
+
+        if outcome.get(
+            "scheduled"
+        ):
+            attempt = outcome.get(
+                "attempt",
+                "?",
+            )
+
+            maximum = outcome.get(
+                "maximum",
+                "?",
+            )
+
+            current = self.tasks.get(
+                task_id
+            )
+
+            current_data = dict(
+                current.result_data
+                if (
+                    current is not None
+                    and isinstance(
+                        current.result_data,
+                        dict,
+                    )
+                )
+                else data
+            )
+
+            current_data[
+                "auto_repair_scheduled"
+            ] = True
+
+            current_data[
+                "auto_repair_attempt"
+            ] = attempt
+
+            current_data[
+                "auto_repair_maximum"
+            ] = maximum
+
+            self.tasks.update(
+                task_id,
+                result=(
+                    str(
+                        result.message
+                        or ""
+                    ).rstrip()
+                    + "\n\n"
+                    + (
+                        "Correction automatique "
+                        f"{attempt}/{maximum} lancée."
+                    )
+                ).strip(),
+                result_data=current_data,
+                error=None,
+            )
+
+            self.notifier(
+                f"✗ {task_id} : "
+                "vérification non validée, "
+                "correction automatique lancée"
+            )
+
+            return
+
+        reason = str(
+            outcome.get(
+                "reason",
+                "Test non validé.",
+            )
+        )
+
+        current = self.tasks.get(
+            task_id
+        )
+
+        current_data = dict(
+            current.result_data
+            if (
+                current is not None
+                and isinstance(
+                    current.result_data,
+                    dict,
+                )
+            )
+            else data
+        )
+
+        if outcome.get(
+            "exhausted"
+        ):
+            current_data[
+                "auto_repair_exhausted"
+            ] = True
+
+        self.tasks.update(
+            task_id,
+            status=(
+                TaskStatus
+                .FAILED
+                .value
+            ),
+            result=result.message,
+            result_data=current_data,
+            error=reason,
+        )
+
+        self.notifier(
+            f"✗ {task_id} : "
+            f"{reason}"
+        )
+
+        self.resume_dependents(
+            task_id
+        )
+
     def _finished(
         self,
         task_id: str,
@@ -329,6 +568,16 @@ class WorkerEngine:
                 task_id
             )
 
+            return
+
+        if self._is_non_validated_test(
+            current,
+            result,
+        ):
+            self._handle_non_validated_test(
+                task_id,
+                result,
+            )
             return
 
         approval = (
