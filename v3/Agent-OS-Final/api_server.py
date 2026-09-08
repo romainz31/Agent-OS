@@ -2,6 +2,34 @@ from __future__ import annotations
 
 import uvicorn
 
+from agentos.personal_manager import (
+    PersonalManager,
+)
+
+# ============================================================
+# MANAGER UPGRADE
+# ============================================================
+#
+# On garde le moteur historique de missions intact et on remplace uniquement
+# la classe Manager utilisée par le runtime par la surcouche relationnelle.
+# Cette injection a lieu AVANT le chargement de agentos.api.
+
+import agentos.runtime as runtime_module
+
+runtime_module.Manager = PersonalManager
+runtime_module.AgentOSRuntime.VERSION = "4.7.3"
+
+from agentos import api as api_module
+
+# L'API existante reste inchangée, mais son statut public reflète la mise à
+# jour réellement chargée par ce serveur.
+api_module.APP_VERSION = "4.7.3"
+api_module.app.version = "4.7.3"
+api_module.app.description = (
+    "Backend local d'Agent-OS avec Manager relationnel, mémoire personnelle "
+    "structurée, mémoire émotionnelle et orchestration multi-agents."
+)
+
 
 def main() -> None:
     print(
@@ -9,7 +37,7 @@ def main() -> None:
     )
 
     print(
-        "AGENT-OS V4.6 — EMOTIONAL MEMORY"
+        "AGENT-OS V4.7.3 — RELATIONAL MANAGER"
     )
 
     print(
@@ -37,8 +65,8 @@ def main() -> None:
     )
 
     print(
-        "\nLe navigateur, la CLI et les futurs clients "
-        "Telegram/Discord se connectent tous à ce même runtime."
+        "\nLe navigateur, la CLI et Telegram se connectent tous "
+        "au même runtime."
     )
 
     print(
@@ -46,7 +74,7 @@ def main() -> None:
     )
 
     uvicorn.run(
-        "agentos.api:app",
+        api_module.app,
         host="127.0.0.1",
         port=8765,
         reload=False,
