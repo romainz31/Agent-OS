@@ -227,6 +227,112 @@ class AgentOSClient:
             or {}
         )
 
+    def mission(
+        self,
+        reference: str,
+    ) -> dict[str, Any]:
+        value = str(
+            reference
+        ).strip()
+
+        result = self._request(
+            f"/api/missions/{value}",
+            timeout=10.0,
+        )
+
+        return dict(
+            result
+            or {}
+        )
+
+    def mission_action(
+        self,
+        reference: str,
+        action: str,
+    ) -> dict[str, Any]:
+        mission_ref = str(
+            reference
+        ).strip()
+        action_name = str(
+            action
+        ).strip().lower()
+
+        if action_name not in {
+            "pause",
+            "resume",
+            "cancel",
+            "retry",
+        }:
+            raise ValueError(
+                "Action de mission inconnue."
+            )
+
+        result = self._request(
+            (
+                f"/api/missions/{mission_ref}/"
+                f"{action_name}"
+            ),
+            method="POST",
+            timeout=30.0,
+        )
+
+        return dict(
+            result
+            or {}
+        )
+
+    def approval_action(
+        self,
+        reference: str,
+        action: str,
+    ) -> dict[str, Any]:
+        mission_ref = str(
+            reference
+        ).strip()
+        action_name = str(
+            action
+        ).strip().lower()
+
+        if action_name not in {
+            "approve",
+            "reject",
+        }:
+            raise ValueError(
+                "Action d'approbation inconnue."
+            )
+
+        result = self._request(
+            (
+                f"/api/approvals/{mission_ref}/"
+                f"{action_name}"
+            ),
+            method="POST",
+            timeout=60.0,
+        )
+
+        return dict(
+            result
+            or {}
+        )
+
+    def approve_mission(
+        self,
+        reference: str,
+    ) -> dict[str, Any]:
+        return self.approval_action(
+            reference,
+            "approve",
+        )
+
+    def reject_mission(
+        self,
+        reference: str,
+    ) -> dict[str, Any]:
+        return self.approval_action(
+            reference,
+            "reject",
+        )
+
     def notifications(
         self,
         *,

@@ -9,7 +9,7 @@ def main() -> None:
     )
 
     print(
-        "AGENT-OS V4.3 — SINGLE-RUNTIME SERVER"
+        "AGENT-OS V4.4 — TELEGRAM READY"
     )
 
     print(
