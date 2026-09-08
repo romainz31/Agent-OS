@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+import threading
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -8,6 +11,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
 )
 
 from fastapi.middleware.cors import (
@@ -27,12 +31,16 @@ from pydantic import (
     Field,
 )
 
+from agentos.events import (
+    NotificationHub,
+)
 from agentos.runtime import (
     AgentOSRuntime,
 )
 
 
-APP_VERSION = "4.0"
+APP_VERSION = "4.3"
+SERVER_INSTANCE_ID = uuid.uuid4().hex
 
 PROJECT_DIR = (
     Path(__file__)
@@ -46,6 +54,10 @@ WEB_DIR = (
     / "web"
 )
 
+CLIENT_ID_RE = re.compile(
+    r"^[A-Za-z0-9._:-]{1,128}$"
+)
+
 
 class ChatRequest(BaseModel):
     message: str = Field(
@@ -54,26 +66,80 @@ class ChatRequest(BaseModel):
     )
 
 
+def notification_collector(
+    runtime: AgentOSRuntime,
+    hub: NotificationHub,
+    stop_event: threading.Event,
+) -> None:
+    while not stop_event.wait(0.2):
+        try:
+            hub.ingest(
+                runtime.notifications()
+            )
+        except Exception:
+            # Une erreur de collecte ne doit jamais arrêter le runtime.
+            continue
+
+    try:
+        hub.ingest(
+            runtime.notifications()
+        )
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(
     app: FastAPI,
 ):
     runtime = AgentOSRuntime()
+    notification_hub = NotificationHub(
+        max_events=1000,
+        max_clients=200,
+    )
+    stop_notifications = threading.Event()
+
+    collector = threading.Thread(
+        target=notification_collector,
+        args=(
+            runtime,
+            notification_hub,
+            stop_notifications,
+        ),
+        daemon=True,
+        name="agentos-notification-hub",
+    )
 
     app.state.runtime = runtime
+    app.state.notification_hub = (
+        notification_hub
+    )
+    app.state.server_instance_id = (
+        SERVER_INSTANCE_ID
+    )
+
+    collector.start()
 
     yield
 
+    # Laisse les workers terminer proprement pendant que le collecteur
+    # continue d'enregistrer leurs dernières notifications.
     runtime.shutdown()
+
+    stop_notifications.set()
+    collector.join(
+        timeout=2.0
+    )
 
 
 app = FastAPI(
     title="Agent-OS API",
     description=(
-        "Backend local d'Agent-OS V4.0. "
-        "Il expose le Manager, les missions, "
-        "les agents, les approbations, la mémoire "
-        "et le Mission Control au Control Center web."
+        "Backend local d'Agent-OS V4.3. "
+        "Le serveur API possède l'unique runtime et expose le Manager, "
+        "les missions, les agents, les approbations, la mémoire et "
+        "les notifications multi-clients au Web, à la CLI et aux "
+        "futurs adaptateurs Telegram/Discord."
     ),
     version=APP_VERSION,
     docs_url="/docs",
@@ -106,6 +172,11 @@ app.mount(
 )
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+
+
 def runtime_from(
     request: Request,
 ) -> AgentOSRuntime:
@@ -124,6 +195,73 @@ def runtime_from(
         )
 
     return runtime
+
+
+def notification_hub_from(
+    request: Request,
+) -> NotificationHub:
+    hub = getattr(
+        request.app.state,
+        "notification_hub",
+        None,
+    )
+
+    if hub is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Le bus de notifications n'est pas encore prêt."
+            ),
+        )
+
+    return hub
+
+
+def client_id_from(
+    request: Request,
+    response: Response,
+) -> str:
+    header_value = str(
+        request.headers.get(
+            "X-AgentOS-Client",
+            "",
+        )
+        or ""
+    ).strip()
+
+    cookie_value = str(
+        request.cookies.get(
+            "agentos_client",
+            "",
+        )
+        or ""
+    ).strip()
+
+    candidate = (
+        header_value
+        or cookie_value
+    )
+
+    if not CLIENT_ID_RE.fullmatch(
+        candidate
+    ):
+        candidate = (
+            "web-"
+            + uuid.uuid4().hex
+        )
+
+    if not header_value:
+        response.set_cookie(
+            key="agentos_client",
+            value=candidate,
+            max_age=60 * 60 * 24 * 30,
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            path="/",
+        )
+
+    return candidate
 
 
 def raise_http_error(
@@ -163,11 +301,9 @@ def public_status(
         runtime.status()
     )
 
-    core_version = (
-        status.get(
-            "version",
-            "3.9",
-        )
+    core_version = status.get(
+        "version",
+        "3.9",
     )
 
     status[
@@ -178,7 +314,20 @@ def public_status(
         "version"
     ] = APP_VERSION
 
+    status[
+        "server_instance_id"
+    ] = SERVER_INSTANCE_ID
+
+    status[
+        "runtime_owner"
+    ] = "api_server"
+
     return status
+
+
+# ============================================================
+# ROOT / STATUS
+# ============================================================
 
 
 @app.get("/")
@@ -198,6 +347,11 @@ def api_root() -> dict:
         "api": "/api",
         "docs": "/docs",
         "binding": "localhost",
+        "runtime_owner": "api_server",
+        "multi_client": True,
+        "server_instance_id": (
+            SERVER_INSTANCE_ID
+        ),
     }
 
 
@@ -215,15 +369,19 @@ def health(
 
     return {
         "ok": True,
-        "version": (
-            status["version"]
+        "version": status[
+            "version"
+        ],
+        "core_version": status[
+            "core_version"
+        ],
+        "started_at": status[
+            "started_at"
+        ],
+        "server_instance_id": (
+            SERVER_INSTANCE_ID
         ),
-        "core_version": (
-            status["core_version"]
-        ),
-        "started_at": (
-            status["started_at"]
-        ),
+        "runtime_owner": "api_server",
     }
 
 
@@ -247,20 +405,12 @@ def dashboard(
     )
 
     return {
-        "status": (
-            public_status(
-                runtime
-            )
+        "status": public_status(
+            runtime
         ),
-        "agents": (
-            runtime.agents()
-        ),
-        "missions": (
-            runtime.missions()
-        ),
-        "approvals": (
-            runtime.approvals()
-        ),
+        "agents": runtime.agents(),
+        "missions": runtime.missions(),
+        "approvals": runtime.approvals(),
     }
 
 
@@ -273,6 +423,11 @@ def agents(
             request
         ).agents()
     }
+
+
+# ============================================================
+# CHAT
+# ============================================================
 
 
 @app.post("/api/chat")
@@ -309,6 +464,11 @@ def chat(
     raise RuntimeError(
         "Erreur API inattendue."
     )
+
+
+# ============================================================
+# MISSIONS
+# ============================================================
 
 
 @app.get("/api/missions")
@@ -435,6 +595,11 @@ def retry_mission(
     )
 
 
+# ============================================================
+# TASKS
+# ============================================================
+
+
 @app.get("/api/tasks")
 def tasks(
     request: Request,
@@ -449,6 +614,11 @@ def tasks(
             status=status
         )
     }
+
+
+# ============================================================
+# APPROVALS
+# ============================================================
 
 
 @app.get("/api/approvals")
@@ -514,6 +684,11 @@ def reject(
     )
 
 
+# ============================================================
+# MEMORY
+# ============================================================
+
+
 @app.get("/api/memory")
 def memory(
     request: Request,
@@ -523,15 +698,57 @@ def memory(
     ).memory()
 
 
+# ============================================================
+# MULTI-CLIENT NOTIFICATIONS — V4.3
+# ============================================================
+
+
 @app.get("/api/notifications")
 def notifications(
     request: Request,
+    response: Response,
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=500,
+    ),
+) -> dict:
+    client_id = client_id_from(
+        request,
+        response,
+    )
+
+    result = notification_hub_from(
+        request
+    ).read_for_client(
+        client_id,
+        limit=limit,
+    )
+
+    result[
+        "server_instance_id"
+    ] = SERVER_INSTANCE_ID
+
+    return result
+
+
+@app.get("/api/notifications/status")
+def notifications_status(
+    request: Request,
 ) -> dict:
     return {
-        "items": runtime_from(
+        "server_instance_id": (
+            SERVER_INSTANCE_ID
+        ),
+        **notification_hub_from(
             request
-        ).notifications()
+        ).status(),
     }
+
+
+# ============================================================
+# RECOVERY
+# ============================================================
 
 
 @app.get("/api/recovery")

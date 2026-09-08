@@ -1,110 +1,150 @@
 from __future__ import annotations
 
+import os
 import threading
-import time
 
-from agentos.runtime import (
-    AgentOSRuntime,
+from agentos.client import (
+    AgentOSClient,
+    AgentOSClientError,
+    AgentOSUnavailable,
 )
 
 
-def print_recovery_report(
-    runtime: AgentOSRuntime,
-) -> None:
-    lines = (
-        runtime
-        .recovery_report_lines()
-    )
-
-    if not lines:
-        return
-
-    for line in lines:
-        print(
-            line
-        )
-
-    print()
+DEFAULT_API_URL = (
+    "http://127.0.0.1:8765"
+)
 
 
 def notification_loop(
-    runtime: AgentOSRuntime,
+    client: AgentOSClient,
     stop_event: threading.Event,
 ) -> None:
-    while not (
-        stop_event.is_set()
-    ):
-        notifications = (
-            runtime.notifications()
-        )
+    offline_reported = False
+
+    while not stop_event.wait(0.35):
+        try:
+            result = client.notifications(
+                limit=100
+            )
+
+            offline_reported = False
+
+        except AgentOSClientError as exc:
+            if not offline_reported:
+                print()
+                print(
+                    "[CLI] Connexion au serveur perdue :"
+                )
+                print(
+                    str(exc),
+                    flush=True,
+                )
+                print()
+                offline_reported = True
+
+            continue
 
         for notification in (
-            notifications
+            result.get(
+                "items",
+                [],
+            )
+            or []
         ):
             print()
-
             print(
                 "[MANAGER]"
             )
-
             print(
                 notification,
                 flush=True,
             )
-
             print()
-
-        time.sleep(
-            0.2
-        )
 
 
 def main() -> None:
+    api_url = (
+        os.environ.get(
+            "AGENTOS_API_URL",
+            DEFAULT_API_URL,
+        )
+        .strip()
+        .rstrip("/")
+    )
+
+    client = AgentOSClient(
+        api_url
+    )
+
+    print(
+        "=" * 64
+    )
+    print(
+        "AGENT-OS V4.3 — CLI CLIENT"
+    )
     print(
         "=" * 64
     )
 
-    print(
-        (
-            "AGENT-OS V3.9 — "
-            "API-READY RUNTIME"
+    try:
+        health = client.health()
+
+    except AgentOSUnavailable as exc:
+        print(
+            "\nLe serveur Agent-OS n'est pas lancé."
         )
-    )
-
-    print(
-        "=" * 64
-    )
-
-    print(
-        "\nCommandes : "
-        "status | missions | tasks | approvals | memory\n"
-        "Contrôle : pause M-xxx | reprends M-xxx | "
-        "annule M-xxx | retente M-xxx | quit\n"
-        "API séparée : python -u .\\api_server.py\n"
-    )
-
-    runtime = AgentOSRuntime()
-
-    print_recovery_report(
-        runtime
-    )
-
-    stop_notifications = (
-        threading.Event()
-    )
-
-    notification_thread = (
-        threading.Thread(
-            target=notification_loop,
-            args=(
-                runtime,
-                stop_notifications,
-            ),
-            daemon=True,
-            name=(
-                "agentos-notifications"
-            ),
+        print(
+            f"Détail : {exc}"
         )
+        print(
+            "\nLance d'abord, dans un autre terminal :"
+        )
+        print(
+            "python -u .\\api_server.py"
+        )
+        return
+
+    except AgentOSClientError as exc:
+        print(
+            f"\nImpossible de joindre Agent-OS : {exc}"
+        )
+        return
+
+    version = health.get(
+        "version",
+        "?",
+    )
+
+    print(
+        f"\nConnecté à Agent-OS V{version}"
+    )
+    print(
+        f"Serveur : {api_url}"
+    )
+    print(
+        "\nCette CLI ne crée plus de deuxième runtime."
+    )
+    print(
+        "Le navigateur et cette fenêtre parlent au même Manager."
+    )
+    print(
+        "\nCommandes naturelles, status, missions, "
+        "pause M-xxx, reprends M-xxx, etc."
+    )
+    print(
+        "Tape quit pour fermer uniquement cette CLI.\n"
+    )
+
+    stop_notifications = threading.Event()
+
+    notification_thread = threading.Thread(
+        target=notification_loop,
+        args=(
+            client,
+            stop_notifications,
+        ),
+        daemon=True,
+        name="agentos-cli-notifications",
     )
 
     notification_thread.start()
@@ -119,25 +159,23 @@ def main() -> None:
             except EOFError:
                 break
 
-            if (
-                message
-                .strip()
-                .lower()
-                == "quit"
-            ):
+            value = message.strip()
+
+            if value.lower() == "quit":
                 break
 
+            if not value:
+                continue
+
             try:
-                result = (
-                    runtime.handle_message(
-                        message
-                    )
+                result = client.chat(
+                    value
                 )
 
-            except ValueError as exc:
+            except AgentOSClientError as exc:
                 print()
                 print(
-                    "MANAGER >"
+                    "ERREUR >"
                 )
                 print(
                     str(exc)
@@ -155,47 +193,31 @@ def main() -> None:
 
             if response:
                 print()
-
                 print(
                     "MANAGER >"
                 )
-
                 print(
                     response
                 )
-
                 print()
 
     except KeyboardInterrupt:
         print(
-            "\nArrêt demandé."
+            "\nFermeture de la CLI demandée."
         )
 
     finally:
         stop_notifications.set()
-
         notification_thread.join(
-            timeout=1
+            timeout=1.0
         )
 
         print(
-            "\nArrêt du Manager..."
+            "\nCLI fermée."
         )
-
-        runtime.shutdown()
-
-        for notification in (
-            runtime.notifications()
-        ):
-            print()
-
-            print(
-                "[MANAGER]"
-            )
-
-            print(
-                notification
-            )
+        print(
+            "Le serveur Agent-OS continue de tourner."
+        )
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ def main() -> None:
     )
 
     print(
-        "AGENT-OS V4.0 — CONTROL CENTER"
+        "AGENT-OS V4.3 — SINGLE-RUNTIME SERVER"
     )
 
     print(
@@ -17,7 +17,11 @@ def main() -> None:
     )
 
     print(
-        "\nInterface : http://127.0.0.1:8765"
+        "\nCe processus est le cerveau unique d'Agent-OS."
+    )
+
+    print(
+        "Interface : http://127.0.0.1:8765"
     )
 
     print(
@@ -29,12 +33,16 @@ def main() -> None:
     )
 
     print(
-        "\nUn seul processus Agent-OS doit utiliser "
-        "les fichiers de données à la fois."
+        "CLI       : python -u .\\run.py"
     )
 
     print(
-        "Ne lance pas run.py en parallèle.\n"
+        "\nLe navigateur, la CLI et les futurs clients "
+        "Telegram/Discord se connectent tous à ce même runtime."
+    )
+
+    print(
+        "Ne lance qu'un seul api_server.py.\n"
     )
 
     uvicorn.run(
