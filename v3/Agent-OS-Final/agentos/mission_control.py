@@ -366,13 +366,13 @@ class MissionControl:
                     task.id
                 )
 
-        submitted = 0
+        queued = 0
 
         for task_id in reset:
             if self.engine.submit(
                 task_id
             ):
-                submitted += 1
+                queued += 1
 
         self.missions.refresh(
             mission,
@@ -381,7 +381,8 @@ class MissionControl:
 
         return (
             f"{mission.human_id} reprise.\n"
-            f"{submitted} étape(s) relancée(s) immédiatement."
+            f"{len(reset)} étape(s) remise(s) en état.\n"
+            f"{queued} étape(s) replacée(s) dans la file de travail."
         )
 
     def cancel(
@@ -421,14 +422,19 @@ class MissionControl:
             }:
                 continue
 
-            if (
+            # V5.0 : cancel() sait aussi retirer une tâche encore dans le
+            # backlog, pas uniquement un Future déjà actif.
+            was_running = (
                 task.status
                 == TaskStatus.RUNNING.value
-            ):
+            )
+
+            self.engine.cancel(
+                task.id
+            )
+
+            if was_running:
                 running += 1
-                self.engine.cancel(
-                    task.id
-                )
 
             self.tasks.update(
                 task.id,
@@ -514,13 +520,13 @@ class MissionControl:
                 "aucune étape à retenter."
             )
 
-        submitted = 0
+        queued = 0
 
         for task_id in reset:
             if self.engine.submit(
                 task_id
             ):
-                submitted += 1
+                queued += 1
 
         self.missions.refresh(
             mission,
@@ -530,7 +536,7 @@ class MissionControl:
         return (
             f"{mission.human_id} relancée.\n"
             f"{len(reset)} étape(s) remise(s) en état.\n"
-            f"{submitted} étape(s) relancée(s) immédiatement."
+            f"{queued} étape(s) replacée(s) dans la file de travail."
         )
 
     def handle(

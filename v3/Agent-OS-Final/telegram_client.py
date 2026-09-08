@@ -44,6 +44,16 @@ BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "newconversation", "description": "Démarre un nouveau fil"},
     {"command": "research", "description": "État recherche ou lance une recherche"},
     {"command": "researchhistory", "description": "Historique des recherches"},
+    {"command": "skills", "description": "Liste des compétences techniques"},
+    {"command": "skill", "description": "Détail d'une compétence"},
+    {"command": "skillrequire", "description": "Skills requis pour une mission"},
+    {"command": "skillrequirements", "description": "Skills effectifs d'une mission"},
+    {"command": "workload", "description": "Charge globale et workers"},
+    {"command": "backlog", "description": "Tâches en attente"},
+    {"command": "workers", "description": "État des workers"},
+    {"command": "tree", "description": "Arbre d'une mission : M-043"},
+    {"command": "submissions", "description": "Sous-missions : M-043"},
+    {"command": "submission", "description": "Crée une sous-mission"},
     {"command": "autonomy_on", "description": "Active l'autonomie globale"},
     {"command": "autonomy_off", "description": "Désactive l'autonomie globale"},
     {"command": "priority", "description": "Priorité mission : M-043 haute"},
@@ -494,6 +504,22 @@ class TelegramAgentOS:
             "/research Lady Di — lance une vraie recherche\n"
             "/researchhistory — historique des recherches\n\n"
 
+            "COMPÉTENCES V5.2\n"
+            "/skills — liste le Skill Registry\n"
+            "/skill yaml — détail d'une compétence\n"
+            "/skill add yaml — crée une compétence\n"
+            "/skillrequire M-043 yaml, home_assistant — skills requis\n"
+            "/skillrequirements M-043 — skills effectifs + héritage\n\n"
+
+            "WORKLOAD / ARBRES V5\n"
+            "/workload — charge globale et disponibilité\n"
+            "/backlog — tâches actuellement en attente\n"
+            "/workers — état des workers\n"
+            "/tree M-043 — affiche l'arbre complet\n"
+            "/submissions M-043 — liste ses sous-missions directes\n"
+            "/submission M-043 : Recherche la documentation — crée un enfant\n"
+            "/submission M-043 après M-044 : Crée le YAML — enfant dépendant\n\n"
+
             "AUTONOMIE / MISSIONS\n"
             "/autonomy_on — active l'autonomie globale\n"
             "/autonomy_off — désactive l'autonomie globale\n"
@@ -558,6 +584,10 @@ class TelegramAgentOS:
             "decisions": "manager decisions",
             "managercheck": "manager check",
             "researchhistory": "research history",
+            "skills": "skills",
+            "workload": "workload status",
+            "backlog": "backlog",
+            "workers": "workers status",
             "autonomy_on": "autonomie on",
             "autonomy_off": "autonomie off",
         }
@@ -574,6 +604,57 @@ class TelegramAgentOS:
                 )
 
             return "research status", None
+
+        if command == "skill":
+            if args:
+                return "skill " + args, None
+            return "skills", None
+
+        if command == "skillrequire":
+            if not args:
+                return (
+                    None,
+                    "Usage : /skillrequire M-043 yaml, home_assistant",
+                )
+            return "skill require " + args, None
+
+        if command == "skillrequirements":
+            if not args:
+                return (
+                    None,
+                    "Usage : /skillrequirements M-043",
+                )
+            return "skill requirements " + args, None
+
+        if command == "tree":
+            return (
+                "mission tree " + args
+                if args
+                else "mission tree",
+                None,
+            )
+
+        if command == "submissions":
+            if not args:
+                return (
+                    None,
+                    "Usage : /submissions M-043",
+                )
+            return (
+                "sous-missions " + args,
+                None,
+            )
+
+        if command == "submission":
+            if not args:
+                return (
+                    None,
+                    "Usage : /submission M-043 : Recherche la documentation",
+                )
+            return (
+                "sous-mission " + args,
+                None,
+            )
 
         if command == "priority":
             if not args:

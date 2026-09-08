@@ -67,10 +67,20 @@ check("help" in names, "/help présent")
 check("manager" in names, "/manager présent")
 check("conversation" in names, "/conversation présent")
 check("research" in names, "/research présent")
+check("skills" in names, "/skills présent")
+check("skill" in names, "/skill présent")
+check("skillrequire" in names, "/skillrequire présent")
+check("skillrequirements" in names, "/skillrequirements présent")
 check("priority" in names, "/priority présent")
 check("deadline" in names, "/deadline présent")
 check("pause" in names, "/pause présent")
 check("retry" in names, "/retry présent")
+check("workload" in names, "/workload présent")
+check("backlog" in names, "/backlog présent")
+check("workers" in names, "/workers présent")
+check("tree" in names, "/tree présent")
+check("submissions" in names, "/submissions présent")
+check("submission" in names, "/submission présent")
 
 
 obj = object.__new__(module.TelegramAgentOS)
@@ -95,6 +105,66 @@ check(
     message == "Recherche accident Lady Di"
     and error is None,
     "/research avec argument -> recherche",
+)
+
+message, error = obj._command_forward(
+    "skills",
+    "",
+)
+check(message == "skills" and error is None, "/skills traduit correctement")
+
+message, error = obj._command_forward(
+    "skill",
+    "yaml",
+)
+check(message == "skill yaml" and error is None, "/skill traduit correctement")
+
+message, error = obj._command_forward(
+    "skillrequire",
+    "M-043 yaml, home_assistant",
+)
+check(
+    message == "skill require M-043 yaml, home_assistant"
+    and error is None,
+    "/skillrequire traduit correctement",
+)
+
+message, error = obj._command_forward(
+    "skillrequirements",
+    "M-043",
+)
+check(
+    message == "skill requirements M-043"
+    and error is None,
+    "/skillrequirements traduit correctement",
+)
+
+message, error = obj._command_forward(
+    "workload",
+    "",
+)
+check(message == "workload status" and error is None, "/workload traduit correctement")
+
+message, error = obj._command_forward(
+    "tree",
+    "M-043",
+)
+check(message == "mission tree M-043" and error is None, "/tree traduit correctement")
+
+message, error = obj._command_forward(
+    "submissions",
+    "M-043",
+)
+check(message == "sous-missions M-043" and error is None, "/submissions traduit correctement")
+
+message, error = obj._command_forward(
+    "submission",
+    "M-043 : Recherche la documentation",
+)
+check(
+    message == "sous-mission M-043 : Recherche la documentation"
+    and error is None,
+    "/submission traduit correctement",
 )
 
 message, error = obj._command_forward(
@@ -142,8 +212,13 @@ check("/manager" in help_text, "/help documente Manager")
 check("/memoryrelations" in help_text, "/help documente mémoire relationnelle")
 check("/conversation" in help_text, "/help documente conversation")
 check("/research" in help_text, "/help documente recherche")
+check("/skills" in help_text, "/help documente Skill Registry")
+check("/skillrequire M-043" in help_text, "/help documente skills requis")
 check("/priority M-043 haute" in help_text, "/help donne exemple priorité")
 check("/deadline M-043 dans 2h" in help_text, "/help donne exemple deadline")
+check("/workload" in help_text, "/help documente workload")
+check("/tree M-043" in help_text, "/help documente arbre")
+check("/submission M-043" in help_text, "/help documente sous-mission")
 
 
 class FakeTelegram:
