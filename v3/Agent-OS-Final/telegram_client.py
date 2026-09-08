@@ -4,7 +4,6 @@ import json
 import os
 import re
 import threading
-import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -18,10 +17,43 @@ from agentos.client import (
 
 
 TELEGRAM_MESSAGE_LIMIT = 3900
+
 MISSION_RE = re.compile(
     r"\bM-\d{1,6}\b",
     flags=re.IGNORECASE,
 )
+
+
+BOT_COMMANDS: list[dict[str, str]] = [
+    {"command": "help", "description": "Toutes les commandes Agent-OS"},
+    {"command": "status", "description": "État général d'Agent-OS"},
+    {"command": "briefing", "description": "Point équipe et missions"},
+    {"command": "manager", "description": "État du Manager autonome"},
+    {"command": "decisions", "description": "Décisions récentes du Manager"},
+    {"command": "managercheck", "description": "Force une supervision immédiate"},
+    {"command": "memory", "description": "Mémoire personnelle utile"},
+    {"command": "memoryops", "description": "Historique opérationnel"},
+    {"command": "memoryrelations", "description": "Mémoire relationnelle"},
+    {"command": "memoryhistory", "description": "Historique de la mémoire"},
+    {"command": "memorystats", "description": "Statistiques mémoire"},
+    {"command": "memorycleanup", "description": "Maintenance de la mémoire"},
+    {"command": "emotion", "description": "État émotionnel courant"},
+    {"command": "emotionhistory", "description": "Historique émotionnel"},
+    {"command": "conversation", "description": "État du fil de conversation"},
+    {"command": "conversationhistory", "description": "Historique des conversations"},
+    {"command": "newconversation", "description": "Démarre un nouveau fil"},
+    {"command": "research", "description": "État recherche ou lance une recherche"},
+    {"command": "researchhistory", "description": "Historique des recherches"},
+    {"command": "autonomy_on", "description": "Active l'autonomie globale"},
+    {"command": "autonomy_off", "description": "Désactive l'autonomie globale"},
+    {"command": "priority", "description": "Priorité mission : M-043 haute"},
+    {"command": "deadline", "description": "Échéance : M-043 dans 2h"},
+    {"command": "pause", "description": "Met une mission en pause"},
+    {"command": "resume", "description": "Reprend une mission"},
+    {"command": "cancel", "description": "Annule une mission"},
+    {"command": "retry", "description": "Retente une mission échouée"},
+    {"command": "id", "description": "Affiche le Chat ID Telegram"},
+]
 
 
 class TelegramAPIError(RuntimeError):
@@ -29,18 +61,11 @@ class TelegramAPIError(RuntimeError):
 
 
 class TelegramAPI:
-    def __init__(
-        self,
-        token: str,
-    ) -> None:
-        self.token = str(
-            token
-        ).strip()
+    def __init__(self, token: str) -> None:
+        self.token = str(token).strip()
 
         if not self.token:
-            raise ValueError(
-                "Token Telegram vide."
-            )
+            raise ValueError("Token Telegram vide.")
 
         self.base_url = (
             "https://api.telegram.org/bot"
@@ -57,16 +82,13 @@ class TelegramAPI:
         data = None
 
         if payload:
-            clean_payload = {}
+            clean_payload: dict[str, str] = {}
 
             for key, value in payload.items():
                 if value is None:
                     continue
 
-                if isinstance(
-                    value,
-                    (dict, list),
-                ):
+                if isinstance(value, (dict, list)):
                     clean_payload[key] = json.dumps(
                         value,
                         ensure_ascii=False,
@@ -78,9 +100,7 @@ class TelegramAPI:
                         else "false"
                     )
                 else:
-                    clean_payload[key] = str(
-                        value
-                    )
+                    clean_payload[key] = str(value)
 
             data = urlencode(
                 clean_payload
@@ -91,7 +111,8 @@ class TelegramAPI:
             data=data,
             headers={
                 "Content-Type": (
-                    "application/x-www-form-urlencoded; charset=utf-8"
+                    "application/x-www-form-urlencoded; "
+                    "charset=utf-8"
                 ),
                 "Accept": "application/json",
             },
@@ -155,9 +176,8 @@ class TelegramAgentOS:
         agentos_url: str,
         allowed_chat_id: int | None,
     ) -> None:
-        self.telegram = TelegramAPI(
-            token
-        )
+        self.telegram = TelegramAPI(token)
+
         self.allowed_chat_id = (
             int(allowed_chat_id)
             if allowed_chat_id is not None
@@ -199,7 +219,7 @@ class TelegramAgentOS:
         if not value:
             return []
 
-        chunks = []
+        chunks: list[str] = []
 
         while len(value) > TELEGRAM_MESSAGE_LIMIT:
             split_at = value.rfind(
@@ -221,14 +241,13 @@ class TelegramAgentOS:
             chunks.append(
                 value[:split_at].strip()
             )
+
             value = value[
                 split_at:
             ].strip()
 
         if value:
-            chunks.append(
-                value
-            )
+            chunks.append(value)
 
         return chunks
 
@@ -247,6 +266,7 @@ class TelegramAgentOS:
         number = int(
             raw.split("-")[1]
         )
+
         return f"M-{number:03d}"
 
     @staticmethod
@@ -267,6 +287,53 @@ class TelegramAgentOS:
             )
         )
 
+    @staticmethod
+    def _command_name(
+        text: str,
+    ) -> str:
+        first = str(
+            text
+            or ""
+        ).strip().split(
+            " ",
+            1,
+        )[0]
+
+        if not first.startswith("/"):
+            return ""
+
+        command = first[1:]
+
+        if "@" in command:
+            command = command.split(
+                "@",
+                1,
+            )[0]
+
+        return command.lower()
+
+    @staticmethod
+    def _command_args(
+        text: str,
+    ) -> str:
+        value = str(
+            text
+            or ""
+        ).strip()
+
+        if not value.startswith("/"):
+            return ""
+
+        parts = value.split(
+            None,
+            1,
+        )
+
+        if len(parts) < 2:
+            return ""
+
+        return parts[1].strip()
+
     # =========================================================
     # TELEGRAM OUTPUT
     # =========================================================
@@ -278,13 +345,9 @@ class TelegramAgentOS:
         *,
         reply_markup: dict[str, Any] | None = None,
     ) -> None:
-        chunks = self._chunks(
-            text
-        )
+        chunks = self._chunks(text)
 
-        for index, chunk in enumerate(
-            chunks
-        ):
+        for index, chunk in enumerate(chunks):
             payload: dict[str, Any] = {
                 "chat_id": chat_id,
                 "text": chunk,
@@ -295,14 +358,44 @@ class TelegramAgentOS:
                 reply_markup is not None
                 and index == len(chunks) - 1
             ):
-                payload[
-                    "reply_markup"
-                ] = reply_markup
+                payload["reply_markup"] = reply_markup
 
             self.telegram.call(
                 "sendMessage",
                 payload,
                 timeout=20.0,
+            )
+
+    def _chat_and_send(
+        self,
+        chat_id: int,
+        message: str,
+    ) -> None:
+        self.telegram.call(
+            "sendChatAction",
+            {
+                "chat_id": chat_id,
+                "action": "typing",
+            },
+            timeout=10.0,
+        )
+
+        result = self.agentos.chat(
+            message
+        )
+
+        response = str(
+            result.get(
+                "response",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if response:
+            self.send(
+                chat_id,
+                response,
             )
 
     def send_manager_notification(
@@ -320,9 +413,7 @@ class TelegramAgentOS:
 
         if (
             mission_ref
-            and self._needs_approval(
-                text
-            )
+            and self._needs_approval(text)
         ):
             keyboard = {
                 "inline_keyboard": [
@@ -352,61 +443,73 @@ class TelegramAgentOS:
         )
 
     # =========================================================
-    # SECURITY / COMMANDS
+    # COMMAND MENU / HELP
     # =========================================================
 
-    def _authorized(
+    def register_bot_commands(
         self,
-        chat_id: int,
-    ) -> bool:
-        return (
-            self.allowed_chat_id is not None
-            and chat_id == self.allowed_chat_id
+    ) -> None:
+        self.telegram.call(
+            "setMyCommands",
+            {
+                "commands": BOT_COMMANDS,
+            },
+            timeout=15.0,
         )
-
-    def _command_name(
-        self,
-        text: str,
-    ) -> str:
-        first = str(
-            text
-            or ""
-        ).strip().split(
-            " ",
-            1,
-        )[0]
-
-        if not first.startswith("/"):
-            return ""
-
-        command = first[1:]
-
-        if "@" in command:
-            command = command.split(
-                "@",
-                1,
-            )[0]
-
-        return command.lower()
 
     def _help_text(
         self,
     ) -> str:
         return (
             "Agent-OS Telegram\n\n"
-            "Écris-moi normalement : le message est transmis au même "
-            "Manager que le navigateur et la CLI.\n\n"
-            "Commandes :\n"
-            "/status — état d'Agent-OS\n"
-            "/briefing — point équipe\n"
+            "Tu peux écrire normalement à Paul. Les commandes ci-dessous "
+            "servent surtout de raccourcis.\n\n"
+
+            "GÉNÉRAL\n"
+            "/status — état général d'Agent-OS\n"
+            "/briefing — point équipe et missions\n"
+            "/manager — état du Manager autonome\n"
+            "/decisions — décisions récentes du Manager\n"
+            "/managercheck — force une supervision immédiate\n\n"
+
+            "MÉMOIRE\n"
             "/memory — mémoire personnelle utile\n"
-            "/memoryops — historique opérationnel Agent-OS\n"
-            "/emotion — état émotionnel courant estimé\n"
-            "/emotionhistory — historique émotionnel récent\n"
-            "/id — identifiant de ce chat\n"
-            "/help — aide\n\n"
-            "Les demandes d'autorisation peuvent être validées ou "
-            "refusées avec les boutons Telegram."
+            "/memoryops — historique opérationnel\n"
+            "/memoryrelations — mémoire relationnelle\n"
+            "/memoryhistory — historique des changements\n"
+            "/memorystats — statistiques mémoire\n"
+            "/memorycleanup — maintenance/nettoyage\n\n"
+
+            "ÉMOTIONS\n"
+            "/emotion — état émotionnel courant\n"
+            "/emotionhistory — historique émotionnel\n\n"
+
+            "CONVERSATION\n"
+            "/conversation — état du fil courant\n"
+            "/conversationhistory — anciens fils\n"
+            "/newconversation — démarre un nouveau fil\n\n"
+
+            "RECHERCHE\n"
+            "/research — état de la recherche factuelle\n"
+            "/research Lady Di — lance une vraie recherche\n"
+            "/researchhistory — historique des recherches\n\n"
+
+            "AUTONOMIE / MISSIONS\n"
+            "/autonomy_on — active l'autonomie globale\n"
+            "/autonomy_off — désactive l'autonomie globale\n"
+            "/priority M-043 haute — change la priorité\n"
+            "/deadline M-043 dans 2h — fixe une échéance\n"
+            "/pause M-043 — met en pause\n"
+            "/resume M-043 — reprend\n"
+            "/cancel M-043 — annule\n"
+            "/retry M-043 — retente une mission échouée\n\n"
+
+            "AUTORISATIONS\n"
+            "Les demandes sensibles affichent directement les boutons "
+            "✅ Autoriser et ❌ Refuser.\n\n"
+
+            "/id — affiche ton Chat ID Telegram\n"
+            "/help — affiche cette aide"
         )
 
     def _status_text(
@@ -423,6 +526,132 @@ class TelegramAgentOS:
             f"Missions totales : {status.get('total_missions', 0)}"
         )
 
+    def _command_forward(
+        self,
+        command: str,
+        args: str,
+    ) -> tuple[str | None, str | None]:
+        """
+        Retourne (message Agent-OS, erreur utilisateur).
+        """
+
+        fixed = {
+            "briefing": "briefing",
+            "memory": "memory",
+            "memoryops": "memory operations",
+            "memory_ops": "memory operations",
+            "memoryrelations": "memory relations",
+            "relations": "memory relations",
+            "memoryhistory": "memory history",
+            "relationhistory": "memory history",
+            "memorystats": "memory stats",
+            "memorycleanup": "memory cleanup",
+            "memorymaintenance": "memory cleanup",
+            "emotion": "emotion",
+            "humeur": "emotion",
+            "emotionhistory": "emotion history",
+            "emotion_history": "emotion history",
+            "conversation": "conversation status",
+            "conversationhistory": "conversation history",
+            "newconversation": "nouvelle conversation",
+            "manager": "manager status",
+            "decisions": "manager decisions",
+            "managercheck": "manager check",
+            "researchhistory": "research history",
+            "autonomy_on": "autonomie on",
+            "autonomy_off": "autonomie off",
+        }
+
+        if command in fixed:
+            return fixed[command], None
+
+        if command == "research":
+            if args:
+                return (
+                    "Recherche "
+                    + args,
+                    None,
+                )
+
+            return "research status", None
+
+        if command == "priority":
+            if not args:
+                return (
+                    None,
+                    "Usage : /priority M-043 haute",
+                )
+
+            return (
+                "priorité "
+                + args,
+                None,
+            )
+
+        if command == "deadline":
+            if not args:
+                return (
+                    None,
+                    "Usage : /deadline M-043 dans 2h",
+                )
+
+            return (
+                "deadline "
+                + args,
+                None,
+            )
+
+        if command == "pause":
+            return (
+                "pause "
+                + args
+                if args
+                else "pause",
+                None,
+            )
+
+        if command == "resume":
+            return (
+                "reprends "
+                + args
+                if args
+                else "reprends",
+                None,
+            )
+
+        if command == "cancel":
+            return (
+                "annule "
+                + args
+                if args
+                else "annule",
+                None,
+            )
+
+        if command == "retry":
+            return (
+                "retry "
+                + args
+                if args
+                else "retry",
+                None,
+            )
+
+        return None, None
+
+    # =========================================================
+    # SECURITY
+    # =========================================================
+
+    def _authorized(
+        self,
+        chat_id: int,
+    ) -> bool:
+        return (
+            self.allowed_chat_id is not None
+            and chat_id == self.allowed_chat_id
+        )
+
     # =========================================================
     # INCOMING MESSAGES
     # =========================================================
@@ -431,13 +660,12 @@ class TelegramAgentOS:
         self,
         message: dict[str, Any],
     ) -> None:
-        chat = message.get(
-            "chat"
-        ) or {}
-
-        chat_id_raw = chat.get(
-            "id"
+        chat = (
+            message.get("chat")
+            or {}
         )
+
+        chat_id_raw = chat.get("id")
 
         if chat_id_raw is None:
             return
@@ -455,9 +683,7 @@ class TelegramAgentOS:
         ).strip()
 
         if not text:
-            if self._authorized(
-                chat_id
-            ):
+            if self._authorized(chat_id):
                 self.send(
                     chat_id,
                     "Pour le moment, envoie-moi du texte.",
@@ -465,6 +691,10 @@ class TelegramAgentOS:
             return
 
         command = self._command_name(
+            text
+        )
+
+        args = self._command_args(
             text
         )
 
@@ -520,116 +750,41 @@ class TelegramAgentOS:
                 )
                 return
 
-            if command == "briefing":
-                result = self.agentos.chat(
-                    "briefing"
+            if command:
+                forwarded, error = (
+                    self._command_forward(
+                        command,
+                        args,
+                    )
                 )
+
+                if error:
+                    self.send(
+                        chat_id,
+                        error,
+                    )
+                    return
+
+                if forwarded is not None:
+                    self._chat_and_send(
+                        chat_id,
+                        forwarded,
+                    )
+                    return
+
                 self.send(
                     chat_id,
-                    str(
-                        result.get(
-                            "response",
-                            "",
-                        )
+                    (
+                        f"Commande /{command} inconnue.\n"
+                        "Utilise /help pour voir les commandes disponibles."
                     ),
                 )
                 return
 
-            if command == "memory":
-                result = self.agentos.chat(
-                    "memory"
-                )
-                self.send(
-                    chat_id,
-                    str(
-                        result.get(
-                            "response",
-                            "",
-                        )
-                    ),
-                )
-                return
-
-            if command in {
-                "memoryops",
-                "memory_ops",
-            }:
-                result = self.agentos.chat(
-                    "memory operations"
-                )
-                self.send(
-                    chat_id,
-                    str(
-                        result.get(
-                            "response",
-                            "",
-                        )
-                    ),
-                )
-                return
-
-            if command in {
-                "emotion",
-                "humeur",
-            }:
-                result = self.agentos.chat(
-                    "emotion"
-                )
-                self.send(
-                    chat_id,
-                    str(
-                        result.get(
-                            "response",
-                            "",
-                        )
-                    ),
-                )
-                return
-
-            if command in {
-                "emotionhistory",
-                "emotion_history",
-            }:
-                result = self.agentos.chat(
-                    "emotion history"
-                )
-                self.send(
-                    chat_id,
-                    str(
-                        result.get(
-                            "response",
-                            "",
-                        )
-                    ),
-                )
-                return
-
-            self.telegram.call(
-                "sendChatAction",
-                {
-                    "chat_id": chat_id,
-                    "action": "typing",
-                },
-                timeout=10.0,
+            self._chat_and_send(
+                chat_id,
+                text,
             )
-
-            result = self.agentos.chat(
-                text
-            )
-
-            response = str(
-                result.get(
-                    "response",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            if response:
-                self.send(
-                    chat_id,
-                    response,
-                )
 
         except (
             AgentOSClientError,
@@ -665,17 +820,17 @@ class TelegramAgentOS:
             )
         )
 
-        message = callback.get(
-            "message"
-        ) or {}
-
-        chat = message.get(
-            "chat"
-        ) or {}
-
-        chat_id_raw = chat.get(
-            "id"
+        message = (
+            callback.get("message")
+            or {}
         )
+
+        chat = (
+            message.get("chat")
+            or {}
+        )
+
+        chat_id_raw = chat.get("id")
 
         if chat_id_raw is None:
             return
@@ -843,9 +998,7 @@ class TelegramAgentOS:
             }
 
             if self.offset is not None:
-                payload[
-                    "offset"
-                ] = self.offset
+                payload["offset"] = self.offset
 
             try:
                 updates = self.telegram.call(
@@ -910,21 +1063,30 @@ class TelegramAgentOS:
             )
         )
 
-        print(
-            "=" * 64
-        )
-        print(
-            "AGENT-OS V4.4 — TELEGRAM CLIENT"
-        )
-        print(
-            "=" * 64
-        )
+        try:
+            self.register_bot_commands()
+            commands_status = "menu de commandes synchronisé"
+        except TelegramAPIError as exc:
+            commands_status = (
+                "menu non synchronisé : "
+                + str(exc)
+            )
+
+        print("=" * 64)
+        print("AGENT-OS — TELEGRAM CLIENT")
+        print("=" * 64)
+
         print(
             "Bot Telegram : @"
             + (
                 self.bot_username
                 or "inconnu"
             )
+        )
+
+        print(
+            "Commandes Telegram : "
+            + commands_status
         )
 
         if self.allowed_chat_id is None:
@@ -942,6 +1104,7 @@ class TelegramAgentOS:
 
             try:
                 health = self.agentos.health()
+
                 print(
                     "Agent-OS connecté : V"
                     + str(
@@ -951,6 +1114,7 @@ class TelegramAgentOS:
                         )
                     )
                 )
+
             except Exception as exc:
                 print(
                     "Agent-OS non joignable au démarrage : "
@@ -966,16 +1130,20 @@ class TelegramAgentOS:
             daemon=True,
             name="agentos-telegram-notifications",
         )
+
         notification_thread.start()
 
         try:
             self.update_loop()
+
         except KeyboardInterrupt:
             print(
                 "\nArrêt Telegram demandé."
             )
+
         finally:
             self.stop_event.set()
+
             notification_thread.join(
                 timeout=2.0
             )
@@ -995,6 +1163,7 @@ def env_chat_id() -> int | None:
 
     try:
         return int(raw)
+
     except ValueError as exc:
         raise ValueError(
             "TELEGRAM_ALLOWED_CHAT_ID doit être un nombre entier."

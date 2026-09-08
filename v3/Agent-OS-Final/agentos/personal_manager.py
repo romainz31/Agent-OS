@@ -7,6 +7,7 @@ from typing import Any
 from agentos.conversation import ConversationTracker
 from agentos.llm import LLMError
 from agentos.manager import Manager as CoreManager
+from agentos.research import ResearchGateway, ReliableResearcherWorker
 
 
 class PersonalManager(CoreManager):
@@ -125,6 +126,22 @@ class PersonalManager(CoreManager):
         except Exception:
             # Le suivi de conversation ne doit jamais empêcher Paul de démarrer.
             pass
+
+        self.research_gateway = ResearchGateway(
+            llm=self.llm,
+            permissions=self.permissions,
+            conversation_tracker=self.conversation_tracker,
+        )
+
+        # Remplace le Researcher historique par la variante robuste qui teste
+        # plusieurs backends DDGS séparément. Un backend défaillant ne doit
+        # plus faire échouer toute une mission de recherche.
+        self.engine.register(
+            ReliableResearcherWorker(
+                self.llm,
+                self.permissions,
+            )
+        )
 
     # =========================================================
     # MEMORY ACTIONS
@@ -579,6 +596,44 @@ class PersonalManager(CoreManager):
             pass
 
     # =========================================================
+    # FACTUAL RESEARCH V4.9
+    # =========================================================
+
+    def _research_command_response(
+        self,
+        message: str,
+    ) -> str | None:
+        gateway = getattr(
+            self,
+            "research_gateway",
+            None,
+        )
+        if gateway is None:
+            return None
+        return gateway.command_response(message)
+
+    def _research_response(
+        self,
+        message: str,
+    ) -> str | None:
+        gateway = getattr(
+            self,
+            "research_gateway",
+            None,
+        )
+        if gateway is None:
+            return None
+
+        command = gateway.command_response(message)
+        if command is not None:
+            return command
+
+        if not gateway.should_research(message):
+            return None
+
+        return gateway.answer(message)
+
+    # =========================================================
     # CONVERSATION POLICY
     # =========================================================
 
@@ -787,6 +842,14 @@ MÉMOIRE ÉMOTIONNELLE
   fiable et pertinente pour la demande actuelle.
 - Ne diagnostique jamais et ne transforme jamais une humeur en trait durable.
 
+FIABILITÉ FACTUELLE
+- N'affirme pas comme certain un fait externe précis si le bloc de recherche
+  n'en fournit pas la preuve.
+- Les questions factuelles vérifiables sont normalement prises en charge par
+  le Researcher avant d'arriver ici. Si un détail manque encore, dis que tu ne
+  peux pas le confirmer au lieu de l'inventer.
+- Une ancienne réponse de Paul n'est jamais une source fiable à elle seule.
+
 AGENT-OS / MISSIONS
 - Si le bloc ÉTAT AGENT-OS indique qu'il n'est pas fourni, ne parle pas des
   missions, workers ou approbations et n'en invente aucun.
@@ -975,6 +1038,23 @@ MESSAGE COURANT :
             )
             self._track_exchange(value, autonomy_response)
             return autonomy_response
+
+        research_response = self._research_response(value)
+        if research_response is not None:
+            research_response = self._sanitize_response_for_user(
+                value,
+                research_response,
+            )
+            self.memory.add_session(
+                "user",
+                value,
+            )
+            self.memory.add_session(
+                "assistant",
+                research_response,
+            )
+            self._track_exchange(value, research_response)
+            return research_response
 
         previous_ids = set(
             self.missions.missions

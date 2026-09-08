@@ -6,7 +6,7 @@ from fastapi import Query, Request
 from agentos.personal_manager import PersonalManager
 
 # ============================================================
-# MANAGER + RUNTIME UPGRADE V4.8
+# MANAGER + RUNTIME UPGRADE V4.9
 # ============================================================
 #
 # Le moteur historique reste intact. On remplace :
@@ -25,13 +25,13 @@ runtime_module.AgentOSRuntime = AutonomousRuntime
 
 from agentos import api as api_module
 
-api_module.APP_VERSION = "4.8"
-api_module.app.version = "4.8"
+api_module.APP_VERSION = "4.9"
+api_module.app.version = "4.9"
 api_module.app.description = (
-    "Backend local d'Agent-OS V4.8 avec Manager relationnel, mémoire "
+    "Backend local d'Agent-OS V4.9 avec Manager relationnel, mémoire "
     "personnelle structurée, fil conversationnel persistant, supervision "
-    "autonome des missions, priorités, échéances, récupération contrôlée "
-    "et journal des décisions."
+    "autonome des missions, priorités, échéances, récupération contrôlée, "
+    "journal des décisions et recherche factuelle sourcée."
 )
 
 
@@ -118,13 +118,42 @@ def conversation_history(
 
 
 # ============================================================
+# RESEARCH API
+# ============================================================
+
+
+@api_module.app.get(
+    "/api/research",
+    tags=["Research"],
+)
+def research_status(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(request)
+    return runtime.research_status()
+
+
+@api_module.app.get(
+    "/api/research/history",
+    tags=["Research"],
+)
+def research_history(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(request)
+    return {
+        "items": runtime.research_history()
+    }
+
+
+# ============================================================
 # SERVER
 # ============================================================
 
 
 def main() -> None:
     print("=" * 64)
-    print("AGENT-OS V4.8 — AUTONOMOUS MANAGER")
+    print("AGENT-OS V4.9 — AUTONOMOUS MANAGER")
     print("=" * 64)
 
     print("\nCe processus est le cerveau unique d'Agent-OS.")
@@ -132,6 +161,7 @@ def main() -> None:
     print("API       : http://127.0.0.1:8765/api")
     print("Autonomie : http://127.0.0.1:8765/api/autonomy")
     print("Conversation: http://127.0.0.1:8765/api/conversation")
+    print("Recherche   : http://127.0.0.1:8765/api/research")
     print("Docs      : http://127.0.0.1:8765/docs")
     print("CLI       : python -u .\\run.py")
 
@@ -141,7 +171,8 @@ def main() -> None:
     )
     print(
         "Paul supervise les missions en arrière-plan, conserve le fil de "
-        "conversation et n'auto-valide jamais les autorisations sensibles."
+        "conversation, vérifie les questions factuelles et n'auto-valide "
+        "jamais les autorisations sensibles."
     )
     print("Ne lance qu'un seul api_server.py.\n")
 

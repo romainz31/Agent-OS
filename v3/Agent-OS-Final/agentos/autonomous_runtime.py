@@ -9,7 +9,7 @@ from agentos.runtime import AgentOSRuntime as CoreRuntime
 class AutonomousRuntime(CoreRuntime):
     """Runtime Agent-OS avec superviseur autonome V4.8."""
 
-    VERSION = "4.8"
+    VERSION = "4.9"
 
     def __init__(self) -> None:
         super().__init__()
@@ -85,6 +85,33 @@ class AutonomousRuntime(CoreRuntime):
             return [
                 dict(item)
                 for item in tracker.data.get("history", [])
+                if isinstance(item, dict)
+            ]
+
+    def research_status(self) -> dict[str, Any]:
+        gateway = getattr(
+            self.manager,
+            "research_gateway",
+            None,
+        )
+        if gateway is None:
+            return {"available": False}
+        result = gateway.snapshot()
+        result["available"] = True
+        return result
+
+    def research_history(self) -> list[dict[str, Any]]:
+        gateway = getattr(
+            self.manager,
+            "research_gateway",
+            None,
+        )
+        if gateway is None:
+            return []
+        with gateway.lock:
+            return [
+                dict(item)
+                for item in gateway.data.get("history", [])
                 if isinstance(item, dict)
             ]
 
