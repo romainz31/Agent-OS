@@ -123,6 +123,70 @@ class Manager:
     RECENT_MISSION_LIMIT = 8
     SPECIAL_HISTORY_LIMIT = 5
 
+    # =========================================================
+    # TEAM LEAD POLICY — V4.2
+    # =========================================================
+
+    DEFAULT_REPORTING_MODE = "important"
+
+    REPORTING_MODES = {
+        "quiet",
+        "important",
+        "verbose",
+    }
+
+    REPORTING_MODE_LABELS = {
+        "quiet": "silencieux",
+        "important": "normal",
+        "verbose": "détaillé",
+    }
+
+    ATTENTION_MARKERS = (
+        "besoin de moi",
+        "demande mon attention",
+        "demande mon intervention",
+        "qu'est-ce qui bloque",
+        "qu est ce qui bloque",
+        "qu'est ce qui bloque",
+        "qu'est-ce qui attend",
+        "qu est ce qui attend",
+        "qu'est ce qui attend",
+        "où dois-je intervenir",
+        "ou dois je intervenir",
+        "priorité du moment",
+        "priorite du moment",
+        "priorités du moment",
+        "priorites du moment",
+    )
+
+    BRIEFING_MARKERS = (
+        "briefing",
+        "fais le point",
+        "fais-moi le point",
+        "fais moi le point",
+        "point équipe",
+        "point equipe",
+        "rapport équipe",
+        "rapport equipe",
+        "compte rendu équipe",
+        "compte rendu equipe",
+    )
+
+    RESULT_MARKERS = (
+        "résultat de",
+        "resultat de",
+        "résume-moi le résultat",
+        "resume-moi le resultat",
+        "résume moi le résultat",
+        "resume moi le resultat",
+        "quel est le résultat",
+        "quel est le resultat",
+        "qu'a donné",
+        "qu a donné",
+        "qu'a donne",
+        "qu a donne",
+    )
+
     def __init__(self) -> None:
         self.llm = LLM()
         self.memory = Memory()
@@ -286,6 +350,254 @@ class Manager:
         )
 
     # =========================================================
+    # REPORTING POLICY — V4.2
+    # =========================================================
+
+    def _mission_reporting_mode(
+        self,
+        mission,
+    ) -> str:
+        if mission is None:
+            return self.DEFAULT_REPORTING_MODE
+
+        metadata = (
+            mission.metadata
+            if isinstance(
+                mission.metadata,
+                dict,
+            )
+            else {}
+        )
+
+        mode = str(
+            metadata.get(
+                "reporting_mode",
+                self.DEFAULT_REPORTING_MODE,
+            )
+        ).strip().lower()
+
+        if mode not in self.REPORTING_MODES:
+            return self.DEFAULT_REPORTING_MODE
+
+        return mode
+
+    def _set_mission_reporting_mode(
+        self,
+        mission,
+        mode: str,
+    ) -> None:
+        if mission is None:
+            return
+
+        wanted = str(
+            mode
+        ).strip().lower()
+
+        if wanted not in self.REPORTING_MODES:
+            wanted = self.DEFAULT_REPORTING_MODE
+
+        self.missions.set_status(
+            mission.id,
+            mission.status,
+            metadata_patch={
+                "reporting_mode": wanted,
+            },
+        )
+
+    @classmethod
+    def _reporting_mode_from_text(
+        cls,
+        message: str,
+    ) -> str | None:
+        value = cls._normalize(
+            message
+        )
+
+        quiet_markers = (
+            "seulement à la fin",
+            "seulement a la fin",
+            "uniquement à la fin",
+            "uniquement a la fin",
+            "préviens moi à la fin",
+            "previens moi a la fin",
+            "préviens-moi à la fin",
+            "previens-moi a la fin",
+            "ne me dérange pas",
+            "ne me derange pas",
+            "pas de notification intermédiaire",
+            "pas de notification intermediaire",
+            "mode silencieux",
+        )
+
+        verbose_markers = (
+            "tiens moi au courant",
+            "tiens-moi au courant",
+            "préviens moi de chaque étape",
+            "previens moi de chaque etape",
+            "préviens-moi de chaque étape",
+            "previens-moi de chaque etape",
+            "à chaque étape",
+            "a chaque etape",
+            "mode détaillé",
+            "mode detaille",
+            "notifications détaillées",
+            "notifications detaillees",
+        )
+
+        normal_markers = (
+            "mode normal",
+            "notifications normales",
+            "notification normale",
+            "suivi normal",
+        )
+
+        if any(
+            marker in value
+            for marker in quiet_markers
+        ):
+            return "quiet"
+
+        if any(
+            marker in value
+            for marker in verbose_markers
+        ):
+            return "verbose"
+
+        if any(
+            marker in value
+            for marker in normal_markers
+        ):
+            return "important"
+
+        return None
+
+    def _reporting_command_response(
+        self,
+        message: str,
+    ) -> str | None:
+        mode = self._reporting_mode_from_text(
+            message
+        )
+
+        if mode is None:
+            return None
+
+        reference = self._extract_mission_reference(
+            message
+        )
+
+        # Si le message contient une vraie demande de travail,
+        # l'instruction de reporting appartient à la NOUVELLE mission.
+        # On la laissera donc passer jusqu'au routeur puis on appliquera
+        # le mode juste après la création de la mission.
+        if (
+            reference is None
+            and self.router.route(
+                message
+            ).kind != "conversation"
+        ):
+            return None
+
+        mission = None
+
+        if reference:
+            mission = self.missions.resolve(
+                reference
+            )
+
+            if mission is None:
+                return (
+                    f"Mission {reference} introuvable."
+                )
+
+        else:
+            active = self.missions.active(
+                self.tasks
+            )
+
+            if len(active) == 1:
+                mission = active[0]
+
+            elif not active:
+                return (
+                    "Aucune mission active. "
+                    "Précise une mission, par exemple M-024."
+                )
+
+            else:
+                refs = ", ".join(
+                    item.human_id
+                    for item in active[:6]
+                )
+
+                return (
+                    "Plusieurs missions sont actives : "
+                    f"{refs}. Précise laquelle."
+                )
+
+        self._set_mission_reporting_mode(
+            mission,
+            mode,
+        )
+
+        if mode == "quiet":
+            detail = (
+                "Je te préviendrai seulement si ton intervention "
+                "est indispensable, en cas d'échec final, "
+                "ou lorsque la mission sera terminée."
+            )
+
+        elif mode == "verbose":
+            detail = (
+                "Je te signalerai aussi les étapes importantes "
+                "entre les workers."
+            )
+
+        else:
+            detail = (
+                "Je te signalerai les éléments importants "
+                "sans te notifier à chaque étape."
+            )
+
+        return (
+            f"{mission.human_id} — suivi "
+            f"{self.REPORTING_MODE_LABELS[mode]}.\n"
+            f"{detail}"
+        )
+
+    def _should_notify_task_event(
+        self,
+        text: str,
+        task,
+        mission,
+    ) -> bool:
+        if task is None:
+            return False
+
+        mode = self._mission_reporting_mode(
+            mission
+        )
+
+        if "attend ton approbation" in text:
+            return True
+
+        if "correction automatique lancée" in text:
+            return mode in {
+                "important",
+                "verbose",
+            }
+
+        if text.startswith("✓"):
+            return mode == "verbose"
+
+        # Les échecs terminaux sont annoncés au niveau mission
+        # par _refresh_mission, avec le détail de la tâche.
+        if text.startswith("✗"):
+            return False
+
+        return mode == "verbose"
+
+    # =========================================================
     # HUMANIZED WORKER EVENTS
     # =========================================================
 
@@ -340,6 +652,39 @@ class Manager:
                 "pour modifier :\n"
                 f"{file_text}\n\n"
                 "Tu valides ?"
+            )
+
+        if (
+            text.startswith("✗")
+            and "correction automatique lancée" in text
+        ):
+            data = (
+                task.result_data
+                if isinstance(
+                    task.result_data,
+                    dict,
+                )
+                else {}
+            )
+
+            attempt = data.get(
+                "auto_repair_attempt"
+            )
+            maximum = data.get(
+                "auto_repair_maximum"
+            )
+
+            suffix = ""
+
+            if attempt and maximum:
+                suffix = (
+                    f" ({attempt}/{maximum})"
+                )
+
+            return (
+                f"{mission_ref} — une vérification n'a pas été "
+                "validée. J'ai lancé automatiquement une "
+                f"correction{suffix}."
             )
 
         if text.startswith("✗"):
@@ -660,6 +1005,9 @@ class Manager:
     def _refresh_mission(
         self,
         mission,
+        *,
+        trigger_task=None,
+        emit_notification: bool = True,
     ) -> None:
         if mission is None:
             return
@@ -687,9 +1035,10 @@ class Manager:
                 mission
             )
 
-            self._append_notification(
-                summary
-            )
+            if emit_notification:
+                self._append_notification(
+                    summary
+                )
 
             self.memory.add_session(
                 "system",
@@ -697,22 +1046,59 @@ class Manager:
             )
 
         elif current == "failed":
-            self._append_notification(
-                f"{mission.human_id} — "
-                "la mission s'est arrêtée "
-                "à cause d'une erreur."
+            lines = [
+                f"{mission.human_id} — mission échouée."
+            ]
+
+            if trigger_task is not None:
+                detail = (
+                    trigger_task.error
+                    or trigger_task.result
+                )
+
+                if detail:
+                    lines.extend(
+                        [
+                            "",
+                            f"Étape : {trigger_task.title}",
+                            f"Détail : {detail}",
+                        ]
+                    )
+
+            message = "\n".join(
+                lines
+            )
+
+            if emit_notification:
+                self._append_notification(
+                    message
+                )
+
+            self.memory.add_session(
+                "system",
+                message,
             )
 
         elif current == "cancelled":
-            self._append_notification(
+            message = (
                 f"{mission.human_id} — mission annulée."
             )
 
+            if emit_notification:
+                self._append_notification(
+                    message
+                )
+
         elif current == "rejected":
-            self._append_notification(
+            message = (
                 f"{mission.human_id} — mission refusée. "
                 "La modification n'a pas été appliquée."
             )
+
+            if emit_notification:
+                self._append_notification(
+                    message
+                )
 
     def notify(
         self,
@@ -722,21 +1108,27 @@ class Manager:
             text
         )
 
-        human = self._humanize_task_event(
-            text
-        )
-
-        if human:
-            self._append_notification(
-                human
-            )
-
         mission = self._mission_for_task(
             task
         )
 
+        if self._should_notify_task_event(
+            text,
+            task,
+            mission,
+        ):
+            human = self._humanize_task_event(
+                text
+            )
+
+            if human:
+                self._append_notification(
+                    human
+                )
+
         self._refresh_mission(
-            mission
+            mission,
+            trigger_task=task,
         )
 
     # =========================================================
@@ -1018,13 +1410,14 @@ class Manager:
             task
         )
         self._refresh_mission(
-            mission
+            mission,
+            emit_notification=False,
         )
 
         return result
 
     # =========================================================
-    # OPERATIONAL AWARENESS — V4.1
+    # OPERATIONAL AWARENESS — V4.1 / TEAM LEAD V4.2
     # =========================================================
 
     def _all_missions_refreshed(
@@ -1386,6 +1779,310 @@ class Manager:
             marker in value
             for marker in markers
         )
+
+    def _mission_result_text(
+        self,
+        mission,
+    ) -> str:
+        results = self._mission_results(
+            mission
+        )
+
+        intellectual = results.get(
+            "intellectual_results",
+            [],
+        )
+
+        if intellectual:
+            return str(
+                intellectual[-1]
+            ).strip()
+
+        for task_id in reversed(
+            mission.task_ids
+        ):
+            task = self.tasks.get(
+                task_id
+            )
+
+            if task is None:
+                continue
+
+            result = str(
+                task.result
+                or ""
+            ).strip()
+
+            if result:
+                return result
+
+        return (
+            "Aucun résultat textuel n'est enregistré "
+            "pour cette mission."
+        )
+
+    def _mission_result_response(
+        self,
+        message: str,
+    ) -> str | None:
+        value = self._normalize(
+            message
+        )
+
+        if not any(
+            marker in value
+            for marker in self.RESULT_MARKERS
+        ):
+            return None
+
+        reference = self._extract_mission_reference(
+            message
+        )
+
+        if reference is None:
+            return (
+                "Précise la mission dont tu veux le résultat, "
+                "par exemple M-024."
+            )
+
+        mission = self.missions.resolve(
+            reference
+        )
+
+        if mission is None:
+            return (
+                f"Mission {reference} introuvable."
+            )
+
+        self.missions.refresh(
+            mission,
+            self.tasks,
+        )
+
+        return (
+            f"{mission.human_id} — {mission.title}\n"
+            f"Statut : {self._status_label(mission.status)}\n\n"
+            "Résultat enregistré :\n"
+            f"{self._mission_result_text(mission)}"
+        )
+
+    def _attention_summary(
+        self,
+    ) -> str:
+        snapshot = self._operational_snapshot()
+
+        pending = snapshot[
+            "pending_approvals"
+        ]
+
+        paused = [
+            mission
+            for mission in snapshot["active"]
+            if mission.status == "paused"
+        ]
+
+        active = snapshot[
+            "active"
+        ]
+
+        busy = [
+            worker
+            for worker in snapshot["workers"]
+            if worker["status"] == "busy"
+        ]
+
+        lines: list[str] = []
+
+        if pending:
+            lines.append(
+                "Ton intervention est requise :"
+            )
+
+            for task in pending:
+                mission = self._mission_for_task(
+                    task
+                )
+
+                ref = (
+                    mission.human_id
+                    if mission is not None
+                    else "Mission inconnue"
+                )
+
+                data = (
+                    task.result_data
+                    if isinstance(
+                        task.result_data,
+                        dict,
+                    )
+                    else {}
+                )
+
+                files = (
+                    data.get(
+                        "approval_required_files",
+                        [],
+                    )
+                    or []
+                )
+
+                suffix = (
+                    " — " + ", ".join(files)
+                    if files
+                    else ""
+                )
+
+                lines.append(
+                    f"- {ref} : approbation requise{suffix}"
+                )
+
+        if paused:
+            if lines:
+                lines.append("")
+
+            lines.append(
+                "Missions en pause :"
+            )
+            lines.extend(
+                "- " + self._mission_context_line(
+                    mission
+                )
+                for mission in paused
+            )
+
+        if not lines:
+            if not active:
+                return (
+                    "Rien ne demande ton attention actuellement. "
+                    "Aucune mission n'est active."
+                )
+
+            return (
+                "Rien ne demande ton intervention actuellement. "
+                f"{len(active)} mission(s) active(s) continuent "
+                f"en arrière-plan avec {len(busy)} worker(s) occupé(s)."
+            )
+
+        return "\n".join(
+            lines
+        )
+
+    def _team_briefing(
+        self,
+    ) -> str:
+        snapshot = self._operational_snapshot()
+        counts = snapshot[
+            "counts"
+        ]
+
+        busy = [
+            worker
+            for worker in snapshot["workers"]
+            if worker["status"] == "busy"
+        ]
+
+        lines = [
+            "POINT ÉQUIPE",
+            (
+                f"{counts['active']} mission(s) active(s) | "
+                f"{len(busy)}/4 worker(s) occupé(s) | "
+                f"{len(snapshot['pending_approvals'])} "
+                "approbation(s) en attente"
+            ),
+        ]
+
+        if snapshot[
+            "pending_approvals"
+        ]:
+            lines.extend(
+                [
+                    "",
+                    "À TON ATTENTION",
+                    self._attention_summary(),
+                ]
+            )
+
+        lines.extend(
+            [
+                "",
+                "EN COURS",
+            ]
+        )
+
+        if snapshot[
+            "active"
+        ]:
+            lines.extend(
+                "- " + self._mission_context_line(
+                    mission
+                )
+                for mission in snapshot["active"]
+            )
+        else:
+            lines.append(
+                "Aucune mission active."
+            )
+
+        if busy:
+            lines.extend(
+                [
+                    "",
+                    "WORKERS OCCUPÉS",
+                ]
+            )
+
+            for worker in busy:
+                mission_refs = (
+                    ", ".join(
+                        worker["missions"]
+                    )
+                    or "mission inconnue"
+                )
+
+                task_text = (
+                    " / ".join(
+                        worker["task_titles"][:2]
+                    )
+                    or "tâche en cours"
+                )
+
+                lines.append(
+                    f"- {worker['name']} : "
+                    f"{mission_refs} — {task_text}"
+                )
+
+        return "\n".join(
+            lines
+        )
+
+    def _direct_team_lead_response(
+        self,
+        message: str,
+    ) -> str | None:
+        value = self._normalize(
+            message
+        )
+
+        result = self._mission_result_response(
+            message
+        )
+
+        if result is not None:
+            return result
+
+        if any(
+            marker in value
+            for marker in self.ATTENTION_MARKERS
+        ):
+            return self._attention_summary()
+
+        if any(
+            marker in value
+            for marker in self.BRIEFING_MARKERS
+        ):
+            return self._team_briefing()
+
+        return None
 
     def _direct_operational_response(
         self,
@@ -1769,6 +2466,13 @@ cet état réel. N'invente jamais une mission, un statut, une
 progression ou une occupation de worker.
 
 Tu peux discuter pendant que des missions travaillent en arrière-plan.
+
+Comporte-toi comme un chef d'équipe : ne surcharge pas l'utilisateur
+avec des détails opérationnels inutiles. Fais remonter en priorité ce qui
+requiert une décision humaine, un échec final, un blocage, puis les
+résultats terminés. Les étapes intermédiaires normales peuvent rester
+en arrière-plan.
+
 Réponds naturellement en français et utilise toujours le tutoiement.
 Pour une question simple, réponds de façon courte et directe.
 N'ajoute pas de formule du type « n'hésite pas » ou de proposition générique
@@ -1841,6 +2545,33 @@ MESSAGE :
 
         if command == "status":
             return self._status()
+
+        if command in {
+            "briefing",
+            "brief",
+            "point",
+        }:
+            return self._team_briefing()
+
+        # V4.2 — politique de reporting par mission
+        reporting_response = (
+            self._reporting_command_response(
+                value
+            )
+        )
+
+        if reporting_response is not None:
+            return reporting_response
+
+        # V4.2 — faits de chef d'équipe : résultat, attention, briefing
+        team_lead_response = (
+            self._direct_team_lead_response(
+                value
+            )
+        )
+
+        if team_lead_response is not None:
+            return team_lead_response
 
         # Exact progress / mission reference queries
         if self._looks_like_progress_question(
@@ -1942,12 +2673,33 @@ MESSAGE :
             mission.id
         ] = mission.status
 
+        requested_reporting = (
+            self._reporting_mode_from_text(
+                value
+            )
+        )
+
+        if requested_reporting is not None:
+            self._set_mission_reporting_mode(
+                mission,
+                requested_reporting,
+            )
+
         response = (
             f"Mission {mission.human_id}\n\n"
             + self.orchestrator.format_created(
                 mission
             )
         )
+
+        if requested_reporting is not None:
+            response += (
+                "\n\nSuivi : "
+                + self.REPORTING_MODE_LABELS[
+                    requested_reporting
+                ]
+                + "."
+            )
 
         self.memory.add_session(
             "assistant",
