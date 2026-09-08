@@ -1,0 +1,25 @@
+mqtt:
+  host: 192.168.1.100
+  user: mqtt-user
+  password: xxxxxxxxxx
+cameras:
+  front_door:
+    ffmpeg:
+      input: rtsp://username:password@192.168.1.50/ch0
+    sensors:
+      - label: person
+        confidence: 50
+        track:
+          enabled: true
+    mqtt:
+      topic: home/frigate/front_door/person
+  backyard:
+    ffmpeg:
+      input: rtsp://username:password@192.168.1.60/ch0
+    sensors:
+      - label: person
+        confidence: 50
+        track:
+          enabled: true
+    mqtt:
+      topic: home/frigate/backyard/person

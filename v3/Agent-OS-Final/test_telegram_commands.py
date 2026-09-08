@@ -71,6 +71,12 @@ check("skills" in names, "/skills présent")
 check("skill" in names, "/skill présent")
 check("skillrequire" in names, "/skillrequire présent")
 check("skillrequirements" in names, "/skillrequirements présent")
+check("specialists" in names, "/specialists présent")
+check("specialist" in names, "/specialist présent")
+check("learning" in names, "/learning présent")
+check("learninghistory" in names, "/learninghistory présent")
+check("learning_on" in names, "/learning_on présent")
+check("learning_off" in names, "/learning_off présent")
 check("priority" in names, "/priority présent")
 check("deadline" in names, "/deadline présent")
 check("pause" in names, "/pause présent")
@@ -138,6 +144,58 @@ check(
     and error is None,
     "/skillrequirements traduit correctement",
 )
+
+message, error = obj._command_forward(
+    "specialists",
+    "",
+)
+check(
+    message == "specialists" and error is None,
+    "/specialists traduit correctement",
+)
+
+message, error = obj._command_forward(
+    "specialist",
+    "M-043",
+)
+check(
+    message == "specialist M-043" and error is None,
+    "/specialist traduit correctement",
+)
+
+message, error = obj._command_forward(
+    "specialist",
+    "",
+)
+check(
+    message is None
+    and error == "Usage : /specialist M-043",
+    "/specialist sans argument donne une aide",
+)
+
+message, error = obj._command_forward(
+    "learning",
+    "",
+)
+check(message == "learning status" and error is None, "/learning traduit correctement")
+
+message, error = obj._command_forward(
+    "learninghistory",
+    "",
+)
+check(message == "learning history" and error is None, "/learninghistory traduit correctement")
+
+message, error = obj._command_forward(
+    "learning_on",
+    "",
+)
+check(message == "learning on" and error is None, "/learning_on traduit correctement")
+
+message, error = obj._command_forward(
+    "learning_off",
+    "",
+)
+check(message == "learning off" and error is None, "/learning_off traduit correctement")
 
 message, error = obj._command_forward(
     "workload",
@@ -214,6 +272,11 @@ check("/conversation" in help_text, "/help documente conversation")
 check("/research" in help_text, "/help documente recherche")
 check("/skills" in help_text, "/help documente Skill Registry")
 check("/skillrequire M-043" in help_text, "/help documente skills requis")
+check("/specialists" in help_text, "/help documente spécialistes")
+check("/specialist M-043" in help_text, "/help documente profil spécialiste")
+check("/learning" in help_text, "/help documente apprentissage autonome")
+check("/learninghistory" in help_text, "/help documente historique learning")
+check("/learning_on" in help_text, "/help documente activation learning")
 check("/priority M-043 haute" in help_text, "/help donne exemple priorité")
 check("/deadline M-043 dans 2h" in help_text, "/help donne exemple deadline")
 check("/workload" in help_text, "/help documente workload")

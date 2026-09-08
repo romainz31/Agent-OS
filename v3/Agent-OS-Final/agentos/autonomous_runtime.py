@@ -6,13 +6,15 @@ from typing import Any
 from agentos.autonomy import AutonomyController
 from agentos.hierarchy import MissionHierarchy
 from agentos.skills import SkillRegistry
+from agentos.specialists import SpecialistManager, SpecializedWorkerAdapter
+from agentos.learning import SkillLearningManager, LearningResearcherAdapter
 from agentos.runtime import AgentOSRuntime as CoreRuntime
 
 
 class AutonomousRuntime(CoreRuntime):
-    """Runtime Agent-OS V5.2 : autonomie + workload + hiérarchie + skills."""
+    """Runtime Agent-OS V5.4.1 : autonomie + workload + hiérarchie + skills + spécialistes + apprentissage."""
 
-    VERSION = "5.2"
+    VERSION = "5.4.1"
 
     def _recover_active_work(self) -> dict[str, Any]:
         # CoreRuntime.__init__ appelle cette méthode avant que les contrôleurs
@@ -70,6 +72,51 @@ class AutonomousRuntime(CoreRuntime):
         ):
             self.manager.engine.set_skill_provider(
                 self._skill_context_for_task
+            )
+
+        # V5.3 : les workers existants sont enveloppés à chaud. Aucun agent
+        # Python supplémentaire n'est créé ; le profil spécialiste est calculé
+        # à partir des skills requis au moment de l'exécution.
+        self.specialists = SpecialistManager(
+            self.skills,
+            self.manager,
+        )
+        for worker_name, worker in list(
+            self.manager.engine.workers.items()
+        ):
+            if isinstance(worker, SpecializedWorkerAdapter):
+                continue
+            self.manager.engine.register(
+                SpecializedWorkerAdapter(
+                    worker,
+                    self.specialists,
+                )
+            )
+
+        # V5.4.1 : le contrôleur d'apprentissage intervient AVANT le lancement
+        # réel d'une tâche. Un skill manquant crée une dépendance Researcher ;
+        # le worker métier n'occupe donc aucun slot pendant sa formation.
+        self.learning = SkillLearningManager(
+            self.manager,
+            self.skills,
+            self.hierarchy,
+        )
+        if hasattr(self.manager.engine, "set_preparation_provider"):
+            self.manager.engine.set_preparation_provider(
+                self.learning.prepare_task
+            )
+
+        # Le Researcher spécialisé est ensuite enveloppé pour transformer les
+        # recherches marquées skill_learning en connaissances persistantes.
+        researcher = self.manager.engine.workers.get("researcher")
+        if researcher is not None and not isinstance(
+            researcher, LearningResearcherAdapter
+        ):
+            self.manager.engine.register(
+                LearningResearcherAdapter(
+                    researcher,
+                    self.learning,
+                )
             )
 
         # La récupération historique avait été différée pendant
@@ -201,6 +248,44 @@ class AutonomousRuntime(CoreRuntime):
         return result
 
     # =========================================================
+    # V5.3 DYNAMIC SPECIALISTS
+    # =========================================================
+
+    def specialists_status(self) -> dict[str, Any]:
+        result = self.specialists.snapshot()
+        result["available"] = True
+        return result
+
+    def specialist_detail(
+        self,
+        reference: str,
+    ) -> dict[str, Any]:
+        profiles = self.specialists.profile_for_mission(
+            reference
+        )
+        return {
+            "mission": str(reference).upper(),
+            "profiles": profiles,
+        }
+
+    # =========================================================
+    # V5.4.1 AUTONOMOUS LEARNING
+    # =========================================================
+
+    def learning_status(self) -> dict[str, Any]:
+        result = self.learning.snapshot()
+        result["available"] = True
+        return result
+
+    def learning_history(self) -> list[dict[str, Any]]:
+        with self.learning.lock:
+            return [
+                dict(item)
+                for item in self.learning.data.get("history", [])
+                if isinstance(item, dict)
+            ]
+
+    # =========================================================
     # V5.1 HIERARCHY API
     # =========================================================
 
@@ -247,6 +332,16 @@ class AutonomousRuntime(CoreRuntime):
                 self.skills.snapshot()
             )
 
+        if hasattr(self, "specialists"):
+            result["specialists"] = (
+                self.specialists.snapshot()
+            )
+
+        if hasattr(self, "learning"):
+            result["learning"] = (
+                self.learning.snapshot()
+            )
+
         return result
 
     def handle_message(
@@ -256,6 +351,30 @@ class AutonomousRuntime(CoreRuntime):
         value = str(
             message
         ).strip()
+
+        learning_response = (
+            self.learning.command_response(
+                value
+            )
+        )
+        if learning_response is not None:
+            return {
+                "response": learning_response,
+                "handled_by": "learning",
+                "status": self.status(),
+            }
+
+        specialist_response = (
+            self.specialists.command_response(
+                value
+            )
+        )
+        if specialist_response is not None:
+            return {
+                "response": specialist_response,
+                "handled_by": "specialists",
+                "status": self.status(),
+            }
 
         skill_response = self.skills.command_response(
             value

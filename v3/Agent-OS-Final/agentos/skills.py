@@ -646,6 +646,126 @@ class SkillRegistry:
             self._save()
             return dict(skill)
 
+    def apply_learning(
+        self,
+        name: str,
+        *,
+        knowledge: str,
+        sources: list[dict[str, Any]],
+        worker: str | None = None,
+        confidence: float = 0.60,
+        level: str = "basic",
+        mission: str | None = None,
+    ) -> dict[str, Any]:
+        """Intègre un apprentissage Researcher validé sans écraser du savoir meilleur."""
+        key = self._slug(name)
+        if not key:
+            raise ValueError("Nom de compétence vide.")
+        canonical_level = self._normalize_level(level)
+        clean_knowledge = str(knowledge or "").strip()
+        if not clean_knowledge:
+            raise ValueError("Connaissances apprises vides.")
+
+        with self.lock:
+            skill = self.data["skills"].get(key)
+            now = self._now()
+            if skill is None:
+                skill = {
+                    "key": key,
+                    "name": str(name).strip(),
+                    "description": "Compétence apprise automatiquement par le Researcher.",
+                    "level": canonical_level,
+                    "confidence": self._clamp_confidence(confidence),
+                    "workers": [],
+                    "tags": ["autonomous_learning"],
+                    "sources": [],
+                    "notes": [],
+                    "knowledge": clean_knowledge,
+                    "freshness_days": 90,
+                    "created_at": now,
+                    "updated_at": now,
+                    "last_verified_at": now,
+                    "last_used_at": None,
+                    "uses": 0,
+                    "successes": 0,
+                    "failures": 0,
+                }
+                self.data["skills"][key] = skill
+            else:
+                old_level = str(skill.get("level", "unknown"))
+                if self.LEVEL_ORDER.get(canonical_level, 0) > self.LEVEL_ORDER.get(old_level, 0):
+                    skill["level"] = canonical_level
+                skill["confidence"] = max(
+                    self._clamp_confidence(float(skill.get("confidence", 0.0) or 0.0)),
+                    self._clamp_confidence(confidence),
+                )
+                skill["knowledge"] = clean_knowledge
+                tags = list(skill.get("tags", []) or [])
+                if "autonomous_learning" not in tags:
+                    tags.append("autonomous_learning")
+                if "quarantined_learning" in tags:
+                    tags = [
+                        tag for tag in tags
+                        if tag != "quarantined_learning"
+                    ]
+                skill["tags"] = tags
+                skill["updated_at"] = now
+                skill["last_verified_at"] = now
+
+            if worker:
+                workers = list(skill.get("workers", []) or [])
+                worker_name = str(worker).strip()
+                if worker_name and worker_name not in workers:
+                    workers.append(worker_name)
+                skill["workers"] = workers
+
+            current_sources = list(skill.get("sources", []) or [])
+            by_url = {
+                str(item.get("url", "")): item
+                for item in current_sources
+                if isinstance(item, dict) and str(item.get("url", ""))
+            }
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                url = str(source.get("url", "") or "").strip()
+                if not url:
+                    continue
+                item = by_url.get(url)
+                if item is None:
+                    item = {"url": url}
+                    current_sources.append(item)
+                    by_url[url] = item
+                item["title"] = str(source.get("title", item.get("title", "")) or "").strip()
+                tier = str(source.get("tier", item.get("tier", "C")) or "C").upper()
+                item["tier"] = tier if tier in self.SOURCE_TIERS else "C"
+                item["verified_at"] = now
+
+            skill["sources"] = current_sources
+            skill["updated_at"] = now
+            skill["last_verified_at"] = now
+
+            notes = list(skill.get("notes", []) or [])
+            notes.append({
+                "at": now,
+                "content": "Apprentissage autonome Researcher"
+                + (f" pour {worker}" if worker else "")
+                + (f" — mission {mission}" if mission else ""),
+            })
+            skill["notes"] = notes[-100:]
+
+            self._record(
+                "skill_autonomously_learned",
+                skill=key,
+                mission=mission,
+                detail=(
+                    f"niveau={skill.get('level')} | confiance={float(skill.get('confidence', 0.0)):.2f} | "
+                    f"sources={len(sources)} | worker={worker or '-'}"
+                ),
+            )
+            self._save()
+            return dict(skill)
+
     # =========================================================
     # FRESHNESS / EFFECTIVE KNOWLEDGE
     # =========================================================

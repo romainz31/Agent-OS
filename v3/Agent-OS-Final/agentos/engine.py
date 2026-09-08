@@ -11,7 +11,7 @@ from agentos.tasks import TaskStatus
 
 
 class WorkerEngine:
-    """Moteur d'exécution avec file d'attente pilotée V5.0.
+    """Moteur d'exécution avec file d'attente pilotée V5.4.
 
     V5.0 ajoute :
     - une vraie file d'attente avant ThreadPoolExecutor ;
@@ -87,6 +87,14 @@ class WorkerEngine:
             | None
         ) = None
 
+        # V5.4 : préparation asynchrone avant l'exécution réelle. Le provider
+        # peut créer des dépendances (par exemple un apprentissage Researcher)
+        # et différer la tâche sans consommer de slot worker.
+        self.preparation_provider: (
+            Callable[[Any], dict[str, Any]]
+            | None
+        ) = None
+
         self.stop_event = threading.Event()
         self.dispatch_thread = threading.Thread(
             target=self._dispatch_loop,
@@ -154,6 +162,20 @@ class WorkerEngine:
         """
         with self.condition:
             self.skill_provider = provider
+
+    def set_preparation_provider(
+        self,
+        provider: Callable[[Any], dict[str, Any]] | None,
+    ) -> None:
+        """Branche une étape de préparation V5.4 avant le worker.
+
+        Retour attendu : ``{"ready": True}`` pour continuer ou
+        ``{"ready": False}`` si le provider a préparé une dépendance et
+        souhaite différer l'exécution.
+        """
+        with self.condition:
+            self.preparation_provider = provider
+            self.condition.notify_all()
 
     def wake_scheduler(self) -> None:
         with self.condition:
@@ -643,6 +665,29 @@ class WorkerEngine:
 
         if worker is None:
             return False
+
+        # V5.4 : la préparation se fait avant de passer RUNNING et avant de
+        # consommer un slot. Elle peut injecter une tâche Researcher comme
+        # dépendance réelle puis renvoyer ready=False.
+        if self.preparation_provider is not None:
+            try:
+                preparation = self.preparation_provider(task) or {}
+            except Exception as exc:
+                preparation = {
+                    "ready": True,
+                    "error": str(exc),
+                }
+            if isinstance(preparation, dict) and not bool(
+                preparation.get("ready", True)
+            ):
+                return False
+
+        # Le provider a pu modifier les dépendances ou le statut ; on relit la
+        # Task persistée avant de poursuivre.
+        refreshed = self.tasks.get(task.id)
+        if refreshed is None:
+            return False
+        task = refreshed
 
         # La dépendance peut avoir changé depuis la sélection.
         if self._dependency_failure(

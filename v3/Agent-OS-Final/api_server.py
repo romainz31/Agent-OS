@@ -6,15 +6,14 @@ from fastapi import Query, Request
 from agentos.personal_manager import PersonalManager
 
 # ============================================================
-# MANAGER + RUNTIME UPGRADE V5.2
+# MANAGER + RUNTIME UPGRADE V5.4.1
 # ============================================================
 #
-# V5.2 conserve toutes les briques V4.9/V5.0/V5.1 et ajoute :
-# - Skill Registry persistant ;
-# - niveau, confiance, fraîcheur et sources ;
-# - compétences requises par mission ;
-# - héritage des skills parent -> enfant ;
-# - injection du contexte technique dans le pipeline worker.
+# V5.4.1 conserve V5.3 et ajoute l'apprentissage autonome :
+# - détection prudente des compétences techniques ;
+# - tâche Researcher créée avant le worker si un skill manque ;
+# - validation de la qualité des sources ;
+# - Skill Registry mis à jour avant reprise automatique.
 
 import agentos.runtime as runtime_module
 
@@ -26,10 +25,10 @@ runtime_module.AgentOSRuntime = AutonomousRuntime
 
 from agentos import api as api_module
 
-api_module.APP_VERSION = "5.2"
-api_module.app.version = "5.2"
+api_module.APP_VERSION = "5.4.1"
+api_module.app.version = "5.4.1"
 api_module.app.description = (
-    "Backend local d'Agent-OS V5.2 avec Manager relationnel, mémoire "
+    "Backend local d'Agent-OS V5.4.1 avec Manager relationnel, mémoire "
     "personnelle, conversation persistante, recherche factuelle, autonomie, "
     "workload multi-missions, arbres de sous-missions et Skill Registry persistant."
 )
@@ -182,6 +181,80 @@ def skill_detail(
 
 
 # ============================================================
+# SPECIALISTS API — V5.3
+# ============================================================
+
+
+@api_module.app.get(
+    "/api/specialists",
+    tags=["Specialists"],
+)
+def specialists_status(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    return runtime.specialists_status()
+
+
+@api_module.app.get(
+    "/api/specialists/{reference}",
+    tags=["Specialists"],
+)
+def specialist_detail(
+    reference: str,
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    try:
+        return runtime.specialist_detail(
+            reference
+        )
+    except KeyError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+
+# ============================================================
+# AUTONOMOUS LEARNING API — V5.4.1
+# ============================================================
+
+
+@api_module.app.get(
+    "/api/learning",
+    tags=["Learning"],
+)
+def learning_status(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    return runtime.learning_status()
+
+
+@api_module.app.get(
+    "/api/learning/history",
+    tags=["Learning"],
+)
+def learning_history(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    return {
+        "items": runtime.learning_history()
+    }
+
+
+# ============================================================
 # CONVERSATION API
 # ============================================================
 
@@ -246,7 +319,7 @@ def research_history(
 
 def main() -> None:
     print("=" * 64)
-    print("AGENT-OS V5.2 — SKILL REGISTRY")
+    print("AGENT-OS V5.4.1 — AUTONOMOUS LEARNING")
     print("=" * 64)
 
     print("\nCe processus est le cerveau unique d'Agent-OS.")
@@ -256,6 +329,8 @@ def main() -> None:
     print("Workload    : http://127.0.0.1:8765/api/workload")
     print("Hiérarchie  : http://127.0.0.1:8765/api/hierarchy")
     print("Skills      : http://127.0.0.1:8765/api/skills")
+    print("Spécialistes: http://127.0.0.1:8765/api/specialists")
+    print("Learning    : http://127.0.0.1:8765/api/learning")
     print("Conversation: http://127.0.0.1:8765/api/conversation")
     print("Recherche   : http://127.0.0.1:8765/api/research")
     print("Docs        : http://127.0.0.1:8765/docs")
@@ -268,6 +343,10 @@ def main() -> None:
     print(
         "Les missions peuvent déclarer les skills requis ; les sous-missions "
         "les héritent et le moteur injecte leur contexte technique au worker."
+    )
+    print(
+        "V5.4.1 détecte aussi des besoins techniques évidents : si un skill est "
+        "absent, faible ou périmé, Researcher se documente avant la reprise du worker."
     )
     print("Ne lance qu'un seul api_server.py.\n")
 

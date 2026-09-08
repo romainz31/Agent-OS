@@ -48,6 +48,12 @@ BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "skill", "description": "Détail d'une compétence"},
     {"command": "skillrequire", "description": "Skills requis pour une mission"},
     {"command": "skillrequirements", "description": "Skills effectifs d'une mission"},
+    {"command": "specialists", "description": "Spécialistes dynamiques actifs/récents"},
+    {"command": "specialist", "description": "Profil spécialiste d'une mission"},
+    {"command": "learning", "description": "État de l'apprentissage autonome"},
+    {"command": "learninghistory", "description": "Historique des apprentissages"},
+    {"command": "learning_on", "description": "Active l'apprentissage autonome"},
+    {"command": "learning_off", "description": "Désactive l'apprentissage autonome"},
     {"command": "workload", "description": "Charge globale et workers"},
     {"command": "backlog", "description": "Tâches en attente"},
     {"command": "workers", "description": "État des workers"},
@@ -504,12 +510,18 @@ class TelegramAgentOS:
             "/research Lady Di — lance une vraie recherche\n"
             "/researchhistory — historique des recherches\n\n"
 
-            "COMPÉTENCES V5.2\n"
+            "COMPÉTENCES / SPÉCIALISTES / LEARNING V5.4\n"
             "/skills — liste le Skill Registry\n"
             "/skill yaml — détail d'une compétence\n"
             "/skill add yaml — crée une compétence\n"
             "/skillrequire M-043 yaml, home_assistant — skills requis\n"
-            "/skillrequirements M-043 — skills effectifs + héritage\n\n"
+            "/skillrequirements M-043 — skills effectifs + héritage\n"
+            "/specialists — spécialistes dynamiques actifs/récents\n"
+            "/specialist M-043 — profils calculés pour une mission\n"
+            "/learning — état de l'apprentissage autonome\n"
+            "/learninghistory — historique des apprentissages\n"
+            "/learning_on — active l'apprentissage autonome\n"
+            "/learning_off — désactive l'apprentissage autonome\n\n"
 
             "WORKLOAD / ARBRES V5\n"
             "/workload — charge globale et disponibilité\n"
@@ -585,6 +597,11 @@ class TelegramAgentOS:
             "managercheck": "manager check",
             "researchhistory": "research history",
             "skills": "skills",
+            "specialists": "specialists",
+            "learning": "learning status",
+            "learninghistory": "learning history",
+            "learning_on": "learning on",
+            "learning_off": "learning off",
             "workload": "workload status",
             "backlog": "backlog",
             "workers": "workers status",
@@ -625,6 +642,14 @@ class TelegramAgentOS:
                     "Usage : /skillrequirements M-043",
                 )
             return "skill requirements " + args, None
+
+        if command == "specialist":
+            if not args:
+                return (
+                    None,
+                    "Usage : /specialist M-043",
+                )
+            return "specialist " + args, None
 
         if command == "tree":
             return (
