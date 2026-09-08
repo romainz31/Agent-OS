@@ -232,20 +232,6 @@ class Manager:
         "comment je me sens",
     )
 
-    EMOTIONAL_HISTORY_MARKERS = (
-        "historique émotionnel",
-        "historique emotionnel",
-        "historique de mon humeur",
-        "historique de mes émotions",
-        "historique de mes emotions",
-        "évolution de mon humeur",
-        "evolution de mon humeur",
-        "comment mon humeur a évolué",
-        "comment mon humeur a evolue",
-        "comment je me suis senti aujourd'hui",
-        "comment je me suis sentie aujourd'hui",
-    )
-
     def __init__(self) -> None:
         self.llm = LLM()
         self.memory = Memory()
@@ -2655,12 +2641,6 @@ MESSAGE :
 
         if any(
             marker in value
-            for marker in self.EMOTIONAL_HISTORY_MARKERS
-        ):
-            return self.memory.emotional_history_summary()
-
-        if any(
-            marker in value
             for marker in self.EMOTIONAL_MEMORY_MARKERS
         ):
             return self.memory.emotional_summary()
@@ -2676,7 +2656,7 @@ MESSAGE :
         return None
 
     # =========================================================
-    # EMOTIONAL ACKNOWLEDGEMENT V4.6.3
+    # EMOTIONAL ACKNOWLEDGEMENT V4.6.2
     # =========================================================
 
     def _emotional_acknowledgement(
@@ -2703,9 +2683,6 @@ MESSAGE :
 
         if stress == "high":
             return "Compris. Je vais rester concis et éviter de te charger inutilement pour le moment."
-
-        if stress == "moderate":
-            return "Compris. Je retiens un peu de stress pour le moment, sans en faire plus que ce que tu as dit."
 
         if energy == "low" and motivation == "low":
             return "Compris. Je vais garder les échanges courts et éviter de te surcharger pour le moment."
@@ -2787,17 +2764,6 @@ MESSAGE :
             "/emotion",
         }:
             return self.memory.emotional_summary()
-
-        if command in {
-            "emotion history",
-            "emotionhistory",
-            "emotions history",
-            "historique emotionnel",
-            "historique émotionnel",
-            "/emotionhistory",
-            "/emotion_history",
-        }:
-            return self.memory.emotional_history_summary()
 
         if command in {
             "memory debug",

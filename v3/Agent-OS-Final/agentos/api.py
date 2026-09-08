@@ -39,7 +39,7 @@ from agentos.runtime import (
 )
 
 
-APP_VERSION = "4.4"
+APP_VERSION = "4.6"
 SERVER_INSTANCE_ID = uuid.uuid4().hex
 
 PROJECT_DIR = (
@@ -135,7 +135,7 @@ async def lifespan(
 app = FastAPI(
     title="Agent-OS API",
     description=(
-        "Backend local d'Agent-OS V4.4. "
+        "Backend local d'Agent-OS V4.6. "
         "Le serveur API possède l'unique runtime et expose le Manager, "
         "les missions, les agents, les approbations, la mémoire et "
         "les notifications multi-clients au Web, à la CLI et aux "

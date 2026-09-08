@@ -11,7 +11,7 @@ from agentos.storage import JsonStore
 
 class Memory:
     """
-    Agent-OS V4.6.3 — Personal / Operational Memory + Emotional Context.
+    Agent-OS V4.6.2 — Personal / Operational Memory + Emotional Context.
 
     Les données sont séparées en plusieurs couches :
     - session      : conversation récente ;
@@ -27,7 +27,7 @@ class Memory:
     personnelle.
     """
 
-    SCHEMA_VERSION = "4.6.3"
+    SCHEMA_VERSION = "4.6.2"
 
     SESSION_LIMIT = 60
     LONG_TERM_LIMIT = 250
@@ -79,7 +79,7 @@ class Memory:
     NEGATIVE_EMOTIONAL_VALUES = {
         "energy": {"low"},
         "motivation": {"low"},
-        "stress": {"moderate", "high"},
+        "stress": {"high"},
         "frustration": {"high"},
         "mood": {"negative"},
     }
@@ -137,11 +137,6 @@ class Memory:
             ("high", r"\b(?:je suis motive|je suis motivee|bien motive|bien motivee|j['’ ]?ai envie d['’ ]?avancer|chaud pour avancer|pret a bosser|prete a bosser|on attaque)\b", 0.90),
         ),
         "stress": (
-            # Un qualificatif faible doit gagner sur le motif générique
-            # "stressé" afin de ne pas transformer "un peu stressé" en
-            # stress élevé.
-            ("moderate", r"\b(?:un peu|legerement|plutot)\s+(?:stresse|stressee|anxieux|anxieuse|tendu|tendue)\b", 0.95),
-            ("high", r"\b(?:tres|vraiment|extremement)\s+(?:stresse|stressee|anxieux|anxieuse|tendu|tendue)\b", 0.96),
             ("high", r"\b(?:stresse|stressee|anxieux|anxieuse|sous pression|tendu|tendue|deborde|debordee)\b", 0.90),
             ("low", r"\b(?:detendu|detendue|serein|sereine|relax|calme)\b", 0.82),
         ),
@@ -158,7 +153,7 @@ class Memory:
     EMOTIONAL_LABELS = {
         "energy": ("Énergie", {"low": "basse", "high": "haute"}),
         "motivation": ("Motivation", {"low": "basse", "high": "haute"}),
-        "stress": ("Stress", {"low": "bas", "moderate": "modéré", "high": "élevé"}),
+        "stress": ("Stress", {"low": "bas", "high": "élevé"}),
         "frustration": ("Frustration", {"low": "basse", "high": "élevée"}),
         "mood": ("Humeur", {"positive": "positive", "negative": "négative"}),
     }
@@ -575,19 +570,6 @@ class Memory:
             "history": clean_history[-self.EMOTIONAL_HISTORY_LIMIT:],
         }
 
-        # Depuis V4.6.3, une observation émotionnelle vit dans la couche
-        # ``emotional.history`` et non plus en double dans ``episodic``.
-        # On retire uniquement les doublons créés par V4.6+, sans supprimer
-        # d'autres événements personnels qui peuvent aussi contenir une émotion.
-        self.data["episodic"] = [
-            item
-            for item in self.data["episodic"]
-            if (
-                not isinstance(item, dict)
-                or str(item.get("kind", "")) != "emotional_observation"
-            )
-        ][-self.EPISODIC_LIMIT:]
-
     # =========================================================
     # SESSION
     # =========================================================
@@ -903,11 +885,16 @@ class Memory:
         self.data["emotional"]["history"] = (
             self.data["emotional"]["history"][-self.EMOTIONAL_HISTORY_LIMIT:]
         )
-
-        # L'émotion est volontairement séparée de la mémoire épisodique :
-        # l'historique émotionnel conserve la trace, tandis que ``episodic``
-        # reste réservé aux événements personnels.
-        self._save()
+        # Une observation émotionnelle est un événement personnel, pas un fait durable.
+        self._remember_timeline(
+            "episodic",
+            clean,
+            kind="emotional_observation",
+            source="automatic",
+            confidence=max(float(item["confidence"]) for item in signals.values()),
+            limit=self.EPISODIC_LIMIT,
+        )
+        # _remember_timeline a déjà sauvegardé.
         return signals
 
     def current_emotional_state(self) -> dict[str, dict[str, Any]]:
@@ -989,64 +976,6 @@ class Memory:
         if source:
             lines.append(f"\nDernière observation : « {source} »")
         lines.append("Cet état est temporaire et sa confiance diminue avec le temps.")
-        return "\n".join(lines)
-
-    def emotional_history_summary(
-        self,
-        limit: int = 10,
-    ) -> str:
-        """Retourne l'historique émotionnel sans le confondre avec l'état actuel.
-
-        Chaque observation reste consultable même lorsqu'une observation plus
-        récente l'a remplacée dans ``current``. Les valeurs affichées ici sont
-        donc des observations historiques, pas des affirmations sur l'état
-        présent de l'utilisateur.
-        """
-        history = self.data.get("emotional", {}).get("history", [])
-        if not isinstance(history, list) or not history:
-            return "Aucune observation émotionnelle n'est encore enregistrée."
-
-        now = datetime.now(timezone.utc)
-        rows = [item for item in history[-max(1, limit):] if isinstance(item, dict)]
-        if not rows:
-            return "Aucune observation émotionnelle n'est encore enregistrée."
-
-        lines = ["HISTORIQUE ÉMOTIONNEL"]
-
-        for item in rows:
-            observed = self._parse_time(item.get("at", ""))
-            if observed is not None:
-                age_hours = max(0.0, (now - observed).total_seconds() / 3600.0)
-                when = self._age_label(age_hours)
-            else:
-                when = "date inconnue"
-
-            signals = item.get("signals", {})
-            source = self._clean_text(item.get("source", ""))
-
-            lines.append(f"\n- {when}")
-
-            if isinstance(signals, dict):
-                for dimension in ("mood", "energy", "motivation", "stress", "frustration"):
-                    signal = signals.get(dimension)
-                    if not isinstance(signal, dict):
-                        continue
-                    label, values = self.EMOTIONAL_LABELS[dimension]
-                    raw_value = self._clean_text(signal.get("value", ""))
-                    value_label = values.get(raw_value, raw_value)
-                    confidence = self._clamp_confidence(signal.get("confidence", 0.0))
-                    lines.append(
-                        f"  {label} : {value_label} "
-                        f"(confiance {confidence:.2f})"
-                    )
-
-            if source:
-                lines.append(f"  Source : « {source} »")
-
-        lines.append(
-            "\nCes observations restent dans l'historique même lorsqu'elles "
-            "ne décrivent plus ton état actuel."
-        )
         return "\n".join(lines)
 
     # =========================================================
@@ -1361,17 +1290,7 @@ class Memory:
         return self._format_memory_items(items) if items else "(vide)"
 
     def episodic_context(self, limit: int = 12) -> str:
-        # Les observations émotionnelles ont désormais leur propre vue
-        # (/emotionhistory). On évite de les dupliquer dans /memory afin que
-        # la mémoire personnelle reste lisible.
-        items = [
-            item
-            for item in self.data["episodic"]
-            if (
-                isinstance(item, dict)
-                and str(item.get("kind", "")) != "emotional_observation"
-            )
-        ][-limit:]
+        items = [item for item in self.data["episodic"][-limit:] if isinstance(item, dict)]
         return self._format_memory_items(items, episodic=True) if items else "(vide)"
 
     def operational_context(self, limit: int = 12) -> str:
@@ -1417,23 +1336,14 @@ class Memory:
 
     def concise_summary(self) -> str:
         stats = self.stats()
-        visible_episodic = sum(
-            1
-            for item in self.data["episodic"]
-            if (
-                isinstance(item, dict)
-                and str(item.get("kind", "")) != "emotional_observation"
-            )
-        )
         return (
             "MÉMOIRE PERSONNELLE\n"
             f"Profil : {stats['profile']} | "
             f"Souvenirs durables : {stats['long_term']} | "
-            f"Événements personnels : {visible_episodic}\n\n"
+            f"Événements personnels : {stats['episodic']}\n\n"
             + self.personal_summary()
             + "\n\nLes missions sont séparées de la mémoire personnelle. "
-            + "Utilise `memory operations` pour l'historique Agent-OS et "
-            + "`emotion history` pour l'historique émotionnel."
+            + "Utilise `memory operations` pour l'historique Agent-OS."
         )
 
     def context(self) -> str:
@@ -1463,7 +1373,7 @@ class Memory:
     def format(self) -> str:
         stats = self.stats()
         return (
-            "MEMORY ENGINE V4.6.3 — DEBUG\n"
+            "MEMORY ENGINE V4.6.2 — DEBUG\n"
             f"Profil : {stats['profile']} | Durable : {stats['long_term']} | "
             f"Épisodique perso : {stats['episodic']} | Opérationnel : {stats['operational']} | "
             f"Travail : {stats['working']} | Émotion courant : {stats['emotional_current']} | "

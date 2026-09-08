@@ -399,6 +399,10 @@ class TelegramAgentOS:
             "Commandes :\n"
             "/status — état d'Agent-OS\n"
             "/briefing — point équipe\n"
+            "/memory — mémoire personnelle utile\n"
+            "/memoryops — historique opérationnel Agent-OS\n"
+            "/emotion — état émotionnel courant estimé\n"
+            "/emotionhistory — historique émotionnel récent\n"
             "/id — identifiant de ce chat\n"
             "/help — aide\n\n"
             "Les demandes d'autorisation peuvent être validées ou "
@@ -519,6 +523,75 @@ class TelegramAgentOS:
             if command == "briefing":
                 result = self.agentos.chat(
                     "briefing"
+                )
+                self.send(
+                    chat_id,
+                    str(
+                        result.get(
+                            "response",
+                            "",
+                        )
+                    ),
+                )
+                return
+
+            if command == "memory":
+                result = self.agentos.chat(
+                    "memory"
+                )
+                self.send(
+                    chat_id,
+                    str(
+                        result.get(
+                            "response",
+                            "",
+                        )
+                    ),
+                )
+                return
+
+            if command in {
+                "memoryops",
+                "memory_ops",
+            }:
+                result = self.agentos.chat(
+                    "memory operations"
+                )
+                self.send(
+                    chat_id,
+                    str(
+                        result.get(
+                            "response",
+                            "",
+                        )
+                    ),
+                )
+                return
+
+            if command in {
+                "emotion",
+                "humeur",
+            }:
+                result = self.agentos.chat(
+                    "emotion"
+                )
+                self.send(
+                    chat_id,
+                    str(
+                        result.get(
+                            "response",
+                            "",
+                        )
+                    ),
+                )
+                return
+
+            if command in {
+                "emotionhistory",
+                "emotion_history",
+            }:
+                result = self.agentos.chat(
+                    "emotion history"
                 )
                 self.send(
                     chat_id,
