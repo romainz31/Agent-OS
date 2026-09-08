@@ -1,77 +1,149 @@
 from __future__ import annotations
 
 import uvicorn
+from fastapi import Query, Request
 
-from agentos.personal_manager import (
-    PersonalManager,
-)
+from agentos.personal_manager import PersonalManager
 
 # ============================================================
-# MANAGER UPGRADE
+# MANAGER + RUNTIME UPGRADE V4.8
 # ============================================================
 #
-# On garde le moteur historique de missions intact et on remplace uniquement
-# la classe Manager utilisée par le runtime par la surcouche relationnelle.
-# Cette injection a lieu AVANT le chargement de agentos.api.
+# Le moteur historique reste intact. On remplace :
+# - le Manager par la surcouche relationnelle validée en V4.7 ;
+# - le Runtime par une surcouche qui ajoute le superviseur autonome.
+#
+# L'injection a lieu AVANT le chargement de agentos.api.
 
 import agentos.runtime as runtime_module
 
 runtime_module.Manager = PersonalManager
-runtime_module.AgentOSRuntime.VERSION = "4.7.3"
+
+from agentos.autonomous_runtime import AutonomousRuntime
+
+runtime_module.AgentOSRuntime = AutonomousRuntime
 
 from agentos import api as api_module
 
-# L'API existante reste inchangée, mais son statut public reflète la mise à
-# jour réellement chargée par ce serveur.
-api_module.APP_VERSION = "4.7.3"
-api_module.app.version = "4.7.3"
+api_module.APP_VERSION = "4.8"
+api_module.app.version = "4.8"
 api_module.app.description = (
-    "Backend local d'Agent-OS avec Manager relationnel, mémoire personnelle "
-    "structurée, mémoire émotionnelle et orchestration multi-agents."
+    "Backend local d'Agent-OS V4.8 avec Manager relationnel, mémoire "
+    "personnelle structurée, fil conversationnel persistant, supervision "
+    "autonome des missions, priorités, échéances, récupération contrôlée "
+    "et journal des décisions."
 )
 
 
+# ============================================================
+# AUTONOMY API
+# ============================================================
+
+
+@api_module.app.get(
+    "/api/autonomy",
+    tags=["Autonomy"],
+)
+def autonomy_status(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    return runtime.autonomy_status()
+
+
+@api_module.app.get(
+    "/api/autonomy/decisions",
+    tags=["Autonomy"],
+)
+def autonomy_decisions(
+    request: Request,
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=500,
+    ),
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    return {
+        "items": runtime.autonomy_decisions(
+            limit=limit
+        )
+    }
+
+
+@api_module.app.post(
+    "/api/autonomy/check",
+    tags=["Autonomy"],
+)
+def autonomy_check(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    return runtime.autonomy_check()
+
+
+# ============================================================
+# CONVERSATION API
+# ============================================================
+
+
+@api_module.app.get(
+    "/api/conversation",
+    tags=["Conversation"],
+)
+def conversation_status(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(request)
+    return runtime.conversation_status()
+
+
+@api_module.app.get(
+    "/api/conversation/history",
+    tags=["Conversation"],
+)
+def conversation_history(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(request)
+    return {
+        "items": runtime.conversation_history()
+    }
+
+
+# ============================================================
+# SERVER
+# ============================================================
+
+
 def main() -> None:
-    print(
-        "=" * 64
-    )
+    print("=" * 64)
+    print("AGENT-OS V4.8 — AUTONOMOUS MANAGER")
+    print("=" * 64)
 
-    print(
-        "AGENT-OS V4.7.3 — RELATIONAL MANAGER"
-    )
-
-    print(
-        "=" * 64
-    )
-
-    print(
-        "\nCe processus est le cerveau unique d'Agent-OS."
-    )
-
-    print(
-        "Interface : http://127.0.0.1:8765"
-    )
-
-    print(
-        "API       : http://127.0.0.1:8765/api"
-    )
-
-    print(
-        "Docs      : http://127.0.0.1:8765/docs"
-    )
-
-    print(
-        "CLI       : python -u .\\run.py"
-    )
+    print("\nCe processus est le cerveau unique d'Agent-OS.")
+    print("Interface : http://127.0.0.1:8765")
+    print("API       : http://127.0.0.1:8765/api")
+    print("Autonomie : http://127.0.0.1:8765/api/autonomy")
+    print("Conversation: http://127.0.0.1:8765/api/conversation")
+    print("Docs      : http://127.0.0.1:8765/docs")
+    print("CLI       : python -u .\\run.py")
 
     print(
         "\nLe navigateur, la CLI et Telegram se connectent tous "
         "au même runtime."
     )
-
     print(
-        "Ne lance qu'un seul api_server.py.\n"
+        "Paul supervise les missions en arrière-plan, conserve le fil de "
+        "conversation et n'auto-valide jamais les autorisations sensibles."
     )
+    print("Ne lance qu'un seul api_server.py.\n")
 
     uvicorn.run(
         api_module.app,

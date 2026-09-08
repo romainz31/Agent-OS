@@ -1937,6 +1937,10 @@ class Memory:
             self.data["session"] = kept_session[-self.SESSION_LIMIT:]
 
         result["session_removed"] = session_removed
+        # Valeurs internes utilisées par les autres couches de contexte
+        # (notamment le fil conversationnel persistant) pour appliquer le
+        # même oubli. Elles ne sont jamais affichées à l'utilisateur.
+        result["forgotten_values"] = sorted(forgotten_values)
 
         if changed and persist:
             self._save()
@@ -2732,13 +2736,18 @@ class Memory:
             sections.append("RELATIONS / PERSONNES PERTINENTES:\n" + self._format_relational_items(relations))
         return "\n\n".join(sections)
 
-    def personal_conversation_context(self, query: str) -> str:
+    def personal_conversation_context(
+        self,
+        query: str,
+        *,
+        include_session: bool = True,
+    ) -> str:
         durable = self._format_memory_items(self._relevant_long_term(query))
         episodic = self._format_memory_items(
             self._relevant_episodic(query),
             episodic=True,
         )
-        return (
+        value = (
             "PROFIL UTILISATEUR:\n"
             + self.profile_context()
             + "\n\nMÉMOIRE RELATIONNELLE:\n"
@@ -2749,9 +2758,13 @@ class Memory:
             + episodic
             + "\n\nÉTAT ÉMOTIONNEL ACTUEL (temporaire, estimation):\n"
             + self.emotional_context()
-            + "\n\nCONVERSATION PERSONNELLE RÉCENTE (hors missions):\n"
-            + self.personal_session_context(limit=8)
         )
+        if include_session:
+            value += (
+                "\n\nCONVERSATION PERSONNELLE RÉCENTE (hors missions):\n"
+                + self.personal_session_context(limit=8)
+            )
+        return value
 
     def relevant_context(self, query: str) -> str:
         durable = self._format_memory_items(self._relevant_long_term(query))
@@ -2964,6 +2977,16 @@ class Memory:
 
         selected.reverse()
         return "\n".join(selected) or "(vide)"
+
+    def clear_session(self) -> None:
+        """Vide uniquement le tampon conversationnel récent.
+
+        Les souvenirs personnels structurés, épisodes et missions ne sont pas
+        affectés. Le fil conversationnel V4.8 possède sa propre persistance.
+        """
+        if self.data.get("session"):
+            self.data["session"] = []
+            self._save()
 
     def profile_context(self) -> str:
         labels = {"first_name": "Prénom", "location": "Lieu de vie"}

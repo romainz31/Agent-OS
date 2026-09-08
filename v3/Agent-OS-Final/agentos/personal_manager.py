@@ -4,6 +4,7 @@ import re
 
 from typing import Any
 
+from agentos.conversation import ConversationTracker
 from agentos.llm import LLMError
 from agentos.manager import Manager as CoreManager
 
@@ -70,6 +71,60 @@ class PersonalManager(CoreManager):
         "memoire corrige ",
         "/memorycorrect ",
     )
+
+    CONVERSATION_STATUS_COMMANDS = {
+        "conversation status",
+        "conversation statut",
+        "statut conversation",
+        "fil status",
+        "fil conversation",
+        "conversation debug",
+    }
+
+    CONVERSATION_HISTORY_COMMANDS = {
+        "conversation history",
+        "historique conversation",
+        "historique conversations",
+        "anciens fils",
+    }
+
+    CONVERSATION_NEW_COMMANDS = {
+        "nouvelle conversation",
+        "nouveau fil",
+        "nouvelle discussion",
+        "conversation reset",
+        "reset conversation",
+    }
+
+    CONVERSATION_RESUME_COMMANDS = {
+        "on en était où",
+        "on en etait ou",
+        "on en étais où",
+        "on en etais ou",
+        "où en était on",
+        "ou en etait on",
+        "où en étions nous",
+        "ou en etions nous",
+        "de quoi on parlait",
+        "de quoi parlait on",
+        "on parlait de quoi",
+        "rappelle moi où on en était",
+        "rappelle moi ou on en etait",
+        "reprends la conversation",
+    }
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.conversation_tracker = ConversationTracker()
+        # Première installation : récupère le tampon V4.7 afin de conserver
+        # immédiatement une continuité après la mise à jour.
+        try:
+            self.conversation_tracker.bootstrap_from_session(
+                self.memory.data.get("session", [])
+            )
+        except Exception:
+            # Le suivi de conversation ne doit jamais empêcher Paul de démarrer.
+            pass
 
     # =========================================================
     # MEMORY ACTIONS
@@ -233,6 +288,22 @@ class PersonalManager(CoreManager):
 
         return "Mémoire nettoyée : " + ", ".join(parts) + "."
 
+    def _scrub_conversation_for_memory_action(
+        self,
+        action: dict[str, Any] | None,
+    ) -> None:
+        if not isinstance(action, dict):
+            return
+        if str(action.get("type", "")) != "forget":
+            return
+        values = action.get("forgotten_values", [])
+        if not isinstance(values, (list, tuple, set)):
+            return
+        try:
+            self.conversation_tracker.forget_values(values)
+        except Exception:
+            pass
+
     def _explicit_memory_command_response(
         self,
         message: str,
@@ -248,6 +319,7 @@ class PersonalManager(CoreManager):
                 persist=True,
                 track_action=False,
             )
+            self._scrub_conversation_for_memory_action(action)
             return self._memory_action_response(action)
 
         correction = self._strip_command_prefix(
@@ -402,6 +474,7 @@ class PersonalManager(CoreManager):
         # transformer une simple préférence en long discours ou en mission.
         action = self.memory.consume_memory_action()
         if action is not None:
+            self._scrub_conversation_for_memory_action(action)
             response = self._memory_action_response(
                 action
             )
@@ -456,6 +529,56 @@ class PersonalManager(CoreManager):
         )
 
     # =========================================================
+    # PERSISTENT CONVERSATION THREAD V4.8
+    # =========================================================
+
+    def _conversation_command_response(
+        self,
+        message: str,
+    ) -> str | None:
+        normalized = self._normalize(message)
+
+        if normalized in self.CONVERSATION_STATUS_COMMANDS:
+            return self.conversation_tracker.status_summary()
+
+        if normalized in self.CONVERSATION_HISTORY_COMMANDS:
+            return self.conversation_tracker.history_summary()
+
+        if normalized in self.CONVERSATION_NEW_COMMANDS:
+            self.conversation_tracker.new_thread()
+            try:
+                self.memory.clear_session()
+            except Exception:
+                pass
+            return (
+                "Nouveau fil de conversation créé. "
+                "Les souvenirs personnels restent conservés, mais l'ancien "
+                "contexte de discussion n'est plus injecté dans les réponses."
+            )
+
+        if (
+            normalized in self.CONVERSATION_RESUME_COMMANDS
+            or self.conversation_tracker.is_resume_query(message)
+        ):
+            return self.conversation_tracker.resume_response()
+
+        return None
+
+    def _track_exchange(
+        self,
+        user_message: str,
+        assistant_message: str,
+    ) -> None:
+        try:
+            self.conversation_tracker.add_exchange(
+                user_message,
+                assistant_message,
+            )
+        except Exception:
+            # Une panne du journal conversationnel ne doit jamais casser Paul.
+            pass
+
+    # =========================================================
     # CONVERSATION POLICY
     # =========================================================
 
@@ -496,6 +619,102 @@ class PersonalManager(CoreManager):
                 "equipe agent",
             )
         )
+
+    @classmethod
+    def _is_personal_state_message(cls, message: str) -> bool:
+        if ConversationTracker.transient_state_kind(message) is not None:
+            return True
+
+        normalized = cls._normalize(message)
+        return any(
+            marker in normalized
+            for marker in (
+                "comment je vais",
+                "comment je me sens",
+                "mon humeur",
+                "mon moral",
+                "mon stress",
+                "ma motivation",
+                "mon énergie",
+                "mon energie",
+                "est ce que je t avais dit que j etais fatigue",
+                "est-ce que je t'avais dit que j'étais fatigué",
+            )
+        )
+
+    @classmethod
+    def _sanitize_response_for_user(
+        cls,
+        message: str,
+        response: str,
+    ) -> str:
+        """Nettoie les tics de soutien hors sujet avant affichage.
+
+        Le prompt reste la première protection, mais un petit modèle local peut
+        ignorer une instruction de style. Cette barrière empêche qu'un ancien
+        état émotionnel soit recyclé dans une réponse factuelle sans lien.
+        """
+        raw = str(response or "").strip()
+        if not raw:
+            return raw
+
+        state_relevant = cls._is_personal_state_message(message)
+        parts = re.split(r"(?<=[.!?])\s+|\n+", raw)
+
+        generic_closings = (
+            "n hesite pas",
+            "si tu as besoin",
+            "si tu as d autres questions",
+            "si tu veux approfondir",
+            "si tu veux en savoir plus",
+            "fais moi savoir",
+            "ton bien etre",
+            "ton confort",
+            "reviens quand tu es pret",
+            "reviens quand tu seras pret",
+        )
+
+        irrelevant_state_markers = (
+            "ton energie",
+            "tu as de l energie",
+            "tu n as pas d energie",
+            "ta fatigue",
+            "tu es fatigue",
+            "tu es creve",
+            "repose toi",
+            "besoin de repos",
+            "ton repos",
+            "ton moral",
+            "ton humeur",
+            "ton stress",
+            "ta motivation",
+            "ton bien etre",
+            "ton confort",
+        )
+
+        kept: list[str] = []
+        for part in parts:
+            part = " ".join(str(part or "").split()).strip()
+            if not part:
+                continue
+            normalized = ConversationTracker._normalized_words(part)
+
+            if any(marker in normalized for marker in generic_closings):
+                continue
+
+            if (
+                not state_relevant
+                and any(
+                    marker in normalized
+                    for marker in irrelevant_state_markers
+                )
+            ):
+                continue
+
+            kept.append(part)
+
+        cleaned = " ".join(kept).strip()
+        return cleaned or raw
 
     def _conversation(
         self,
@@ -539,14 +758,19 @@ RÈGLES RELATIONNELLES
   l'utilisateur parle explicitement de mémoire.
 
 RÈGLES DE CONVERSATION
+- Le bloc FIL DE CONVERSATION ACTIF décrit la continuité de la discussion.
+  Utilise-le pour comprendre les pronoms, les références comme « ça »,
+  « celui-là », « comme on disait », et les questions de suivi.
+- Ne prétends jamais qu'un détail figure dans le fil s'il n'y figure pas.
 - Réponds directement à ce que l'utilisateur vient de dire ou demander.
 - N'ouvre pas un ancien sujet juste parce qu'il apparaît dans la conversation
   récente.
 - Ne reparle pas d'une ancienne mission dans une conversation personnelle si
   l'utilisateur ne l'a pas demandée.
 - Ne propose pas de mission ou de travail supplémentaire sans besoin réel.
-- Ne termine pas systématiquement par une question, « n'hésite pas », une
-  proposition générique ou une relance artificielle.
+- Ne termine pas par « n'hésite pas », « si tu as besoin », « ton bien-être
+  reste ma priorité », « ton confort reste ma priorité » ou une relance
+  générique équivalente. Réponds puis arrête-toi.
 - Pour une question simple, fais court. Pour une demande complexe, développe
   seulement ce qui est utile.
 - Réponds naturellement en français et tutoie toujours l'utilisateur.
@@ -554,8 +778,13 @@ RÈGLES DE CONVERSATION
 MÉMOIRE ÉMOTIONNELLE
 - L'état émotionnel est temporaire et incertain. Une observation ancienne
   appartient à l'historique et ne décrit pas forcément l'état actuel.
+- Si le message courant ne parle pas explicitement de l'état de l'utilisateur,
+  ne mentionne absolument pas sa fatigue, son repos, son énergie, son stress,
+  sa motivation, son confort ou son bien-être.
+- Si l'utilisateur a ensuite indiqué que l'état temporaire est terminé ou
+  inversé, ne répète plus l'ancien conseil (« repose-toi », etc.).
 - Adapte légèrement la densité ou le ton seulement si l'estimation est assez
-  fiable.
+  fiable et pertinente pour la demande actuelle.
 - Ne diagnostique jamais et ne transforme jamais une humeur en trait durable.
 
 AGENT-OS / MISSIONS
@@ -569,7 +798,11 @@ AGENT-OS / MISSIONS
         prompt = f"""
 MÉMOIRE PERSONNELLE PERTINENTE :
 
-{self.memory.personal_conversation_context(message)}
+{self.memory.personal_conversation_context(message, include_session=False)}
+
+FIL DE CONVERSATION ACTIF :
+
+{self.conversation_tracker.context_for(message, limit=10)}
 
 ÉTAT AGENT-OS :
 
@@ -581,9 +814,13 @@ MESSAGE COURANT :
 """
 
         try:
-            return self.llm.chat(
+            response = self.llm.chat(
                 prompt,
                 system=system,
+            )
+            return self._sanitize_response_for_user(
+                message,
+                response,
             )
 
         except LLMError as exc:
@@ -591,3 +828,208 @@ MESSAGE COURANT :
                 "Ollama inaccessible : "
                 f"{exc}"
             )
+
+    # =========================================================
+    # AUTONOMOUS MANAGER V4.8
+    # =========================================================
+
+    def set_autonomy_controller(
+        self,
+        controller,
+    ) -> None:
+        self.autonomy_controller = controller
+
+    def _autonomy(self):
+        return getattr(
+            self,
+            "autonomy_controller",
+            None,
+        )
+
+    def notify(
+        self,
+        text: str,
+    ) -> None:
+        controller = self._autonomy()
+
+        if controller is not None:
+            try:
+                controller.on_worker_event(
+                    text
+                )
+            except Exception as exc:
+                controller.record(
+                    "event_recovery_error",
+                    level="warning",
+                    detail=str(exc),
+                )
+
+        # Le moteur historique reste la source de vérité pour les statuts,
+        # notifications et la mémoire opérationnelle. Si l'autonomie a déjà
+        # réinitialisé la tâche, _refresh_mission verra simplement la mission
+        # redevenue active au lieu de la figer en échec.
+        super().notify(
+            text
+        )
+
+    def _autonomy_command_response(
+        self,
+        message: str,
+    ) -> str | None:
+        controller = self._autonomy()
+        if controller is None:
+            return None
+        return controller.command_response(
+            message
+        )
+
+    def _new_missions_since(
+        self,
+        previous_ids: set[str],
+    ) -> list:
+        return [
+            mission
+            for mission in self.missions.list()
+            if mission.id not in previous_ids
+        ]
+
+    def _apply_new_mission_policy(
+        self,
+        mission,
+        message: str,
+    ) -> str:
+        controller = self._autonomy()
+        if controller is None:
+            return ""
+
+        result = controller.apply_creation_policy(
+            mission,
+            message,
+        )
+
+        bits = []
+        priority = result.get(
+            "priority"
+        )
+        deadline = result.get(
+            "deadline"
+        )
+
+        if priority is not None:
+            bits.append(
+                "priorité "
+                + controller.PRIORITY_LABELS[
+                    priority
+                ]
+            )
+
+        if deadline is not None:
+            bits.append(
+                "échéance "
+                + deadline.isoformat(
+                    timespec="minutes"
+                )
+            )
+
+        if not bits:
+            return ""
+
+        return (
+            "\n\nPilotage Manager : "
+            + " | ".join(bits)
+            + " | autonomie active."
+        )
+
+    def handle(
+        self,
+        message: str,
+    ) -> str:
+        value = str(
+            message
+            or ""
+        ).strip()
+
+        if not value:
+            return ""
+
+        conversation_response = (
+            self._conversation_command_response(value)
+        )
+        if conversation_response is not None:
+            return conversation_response
+
+        autonomy_response = (
+            self._autonomy_command_response(
+                value
+            )
+        )
+
+        if autonomy_response is not None:
+            self.memory.add_session(
+                "user",
+                value,
+            )
+            self.memory.add_session(
+                "assistant",
+                autonomy_response,
+            )
+            self._track_exchange(value, autonomy_response)
+            return autonomy_response
+
+        previous_ids = set(
+            self.missions.missions
+        )
+
+        response = super().handle(
+            value
+        )
+        response = self._sanitize_response_for_user(
+            value,
+            response,
+        )
+
+        controller = self._autonomy()
+        if controller is None:
+            self._track_exchange(value, response)
+            return response
+
+        new_missions = self._new_missions_since(
+            previous_ids
+        )
+
+        final_response = response
+
+        if new_missions:
+            # Une interaction utilisateur ne crée normalement qu'une mission.
+            # En cas de changement futur du routeur, on applique néanmoins la
+            # politique à toutes les nouvelles missions détectées.
+            suffixes = []
+
+            for mission in reversed(
+                new_missions
+            ):
+                suffix = self._apply_new_mission_policy(
+                    mission,
+                    value,
+                )
+                if suffix:
+                    suffixes.append(suffix)
+
+            if suffixes:
+                final_response = response + "".join(suffixes)
+
+        self._track_exchange(value, final_response)
+        return final_response
+
+    def _operational_context(
+        self,
+    ) -> str:
+        base = super()._operational_context()
+        controller = self._autonomy()
+        if controller is None:
+            return base
+        return (
+            base
+            + "\n\n"
+            + controller.status_summary()
+        )
