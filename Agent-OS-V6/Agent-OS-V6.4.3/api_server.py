@@ -30,7 +30,7 @@ from agentos import __version__
 api_module.APP_VERSION = __version__
 api_module.app.version = __version__
 api_module.app.description = (
-    "Backend local d'Agent-OS V5.5 avec Manager relationnel, mémoire "
+    "Backend local d'Agent-OS V6.4.3 avec Manager relationnel, mémoire "
     "personnelle, conversation persistante, recherche factuelle, autonomie, "
     "workload multi-missions, arbres de sous-missions et Skill Registry persistant."
 )
@@ -372,7 +372,23 @@ def main() -> None:
     print("Docs        : http://127.0.0.1:8765/docs")
     print("CLI         : python -u .\\run.py")
 
-    print("\nNe lance qu'un seul api_server.py.\n")
+    print(
+        "\nAgent-OS dispose maintenant d'un Skill Registry séparé de la mémoire "
+        "personnelle : compétences, niveaux, confiance, fraîcheur et sources."
+    )
+    print(
+        "Les missions peuvent déclarer les skills requis ; les sous-missions "
+        "les héritent et le moteur injecte leur contexte technique au worker."
+    )
+    print(
+        "V5.4.1 détecte les besoins techniques : si un skill est absent, faible "
+        "ou périmé, Researcher se documente avant la reprise du worker."
+    )
+    print(
+        "V5.5 permet aussi aux workers de demander un renfort ponctuel à un "
+        "collègue, puis de reprendre automatiquement avec sa réponse."
+    )
+    print("Ne lance qu'un seul api_server.py.\n")
 
     uvicorn.run(
         api_module.app,

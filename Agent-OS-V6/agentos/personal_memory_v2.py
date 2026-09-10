@@ -26,7 +26,7 @@ class PersonalMemoryV2:
     de couche de vérité structurée sur ce que l'utilisateur a réellement dit.
     """
 
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     QUESTION_WORDS = {
         "qui", "que", "quoi", "quel", "quelle", "quels", "quelles",
@@ -1740,6 +1740,189 @@ class PersonalMemoryV2:
             return "demain"
         return None
 
+
+    # =========================================================
+    # ACTOR-AWARE PERSONAL RECALL V6.5.1
+    # =========================================================
+
+    @classmethod
+    def _v651_primary_query_text(cls, query: str) -> str:
+        raw = str(query or "")
+        parts = re.split(
+            r"\n\s*Contexte utilisateur précédent\s*:",
+            raw,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )
+        return cls._clean(parts[0])
+
+    def _v651_query_actor(self, query: str) -> dict[str, str | None]:
+        """Résout d'abord QUI est le sujet de la question."""
+        primary = self._v651_primary_query_text(query)
+        normalized = self.normalize(primary)
+
+        # Première personne = utilisateur, même si Coralie est l'objet.
+        if re.search(r"\b(?:je|moi)\b", normalized):
+            return {"type": "user", "name": None}
+
+        # V6.5.2 : résolution des alias relationnels par People Profiles.
+        resolver = getattr(self, "person_reference_resolver", None)
+        if callable(resolver):
+            try:
+                resolved_name = resolver(primary)
+            except Exception:
+                resolved_name = None
+            if resolved_name:
+                return {
+                    "type": "person",
+                    "name": self._clean(resolved_name),
+                }
+
+        explicit_people = []
+        for person in self.known_people():
+            wanted = self.normalize(person)
+            if wanted and re.search(
+                rf"(?<![a-z0-9]){re.escape(wanted)}(?![a-z0-9])",
+                normalized,
+            ):
+                explicit_people.append(person)
+
+        if len(explicit_people) == 1:
+            return {"type": "person", "name": explicit_people[0]}
+
+        # Relance avec pronom : le contexte utilisateur enrichi sert seulement
+        # à résoudre « elle / il », jamais à changer un « je » en autre chose.
+        if re.search(r"\b(?:elle|il|lui)\b", normalized):
+            full = self.normalize(query)
+            contextual = []
+            for person in self.known_people():
+                wanted = self.normalize(person)
+                if wanted and re.search(
+                    rf"(?<![a-z0-9]){re.escape(wanted)}(?![a-z0-9])",
+                    full,
+                ):
+                    contextual.append(person)
+
+            unique = []
+            seen = set()
+            for person in contextual:
+                key = self.normalize(person)
+                if key and key not in seen:
+                    seen.add(key)
+                    unique.append(person)
+
+            if len(unique) == 1:
+                return {"type": "person", "name": unique[0]}
+
+        return {"type": "unknown", "name": None}
+
+    def _v651_fact_matches_actor(
+        self,
+        fact: dict[str, Any],
+        actor: dict[str, str | None],
+    ) -> bool:
+        actor_type = str(actor.get("type") or "unknown")
+        subject_type = str(fact.get("subject_type") or "")
+
+        if actor_type == "unknown":
+            return True
+        if actor_type == "user":
+            return subject_type == "user"
+        if actor_type == "person":
+            if subject_type != "person":
+                return False
+            wanted = self.normalize(actor.get("name") or "")
+            actual = self.normalize(fact.get("subject_name") or "")
+            return bool(wanted and actual and wanted == actual)
+        return False
+
+    def _v651_actor_facts(
+        self,
+        item: dict[str, Any],
+        actor: dict[str, str | None],
+        *,
+        predicates: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        result = []
+        for fact in item.get("facts", []):
+            if not isinstance(fact, dict):
+                continue
+            if not self._v651_fact_matches_actor(fact, actor):
+                continue
+            predicate = str(fact.get("predicate") or "")
+            if predicates is not None and predicate not in predicates:
+                continue
+            result.append(fact)
+        return result
+
+    def _v651_matches_for_actor(
+        self,
+        matches: list[dict[str, Any]],
+        actor: dict[str, str | None],
+    ) -> list[dict[str, Any]]:
+        if str(actor.get("type") or "unknown") == "unknown":
+            return list(matches)
+        return [
+            item
+            for item in matches
+            if self._v651_actor_facts(item, actor)
+        ]
+
+    def _v651_explicit_person_destination(
+        self,
+        item: dict[str, Any],
+        person: str,
+    ) -> str | None:
+        """N'utilise un lieu comme destination que si le texte dit allé(e)."""
+        content = self.normalize(item.get("content", ""))
+        wanted = self.normalize(person)
+        if not wanted:
+            return None
+
+        named_move = re.search(
+            rf"(?<![a-z0-9]){re.escape(wanted)}(?![a-z0-9]).{{0,60}}"
+            r"\b(?:est allee|est alle|s est rendue|s est rendu)\b",
+            content,
+        )
+        pronoun_move = re.search(
+            r"\b(?:elle est allee|il est alle|elle s est rendue|il s est rendu)\b",
+            content,
+        )
+
+        if not (named_move or pronoun_move):
+            return None
+
+        places = [
+            self._clean(place)
+            for place in item.get("places", [])
+            if self._clean(place)
+        ]
+        return places[0] if places else None
+
+    @staticmethod
+    def _v651_unknown_actor_property(
+        actor: dict[str, str | None],
+        field: str,
+    ) -> str:
+        actor_type = str(actor.get("type") or "unknown")
+        name = str(actor.get("name") or "").strip()
+
+        if actor_type == "person" and name:
+            if field == "where":
+                return f"Je n'ai pas de destination enregistrée pour {name}."
+            if field == "when":
+                return f"Je n'ai pas de date suffisamment précise enregistrée pour {name}."
+            if field == "how":
+                return f"Je n'ai pas de moyen de transport enregistré pour {name}."
+
+        if field == "where":
+            return "Je n'ai pas de lieu suffisamment précis enregistré pour ça."
+        if field == "when":
+            return "Je n'ai pas de date suffisamment précise enregistrée pour ça."
+        if field == "how":
+            return "Je n'ai pas de moyen de transport suffisamment précis enregistré pour ça."
+        return "Je n'ai pas cette information de façon suffisamment précise."
+
     def direct_answer(self, query: str) -> str | None:
         if not self.looks_personal_query(query):
             return None
@@ -1752,9 +1935,16 @@ class PersonalMemoryV2:
         first = matches[0]
 
         if plan["intent"] == "when" or plan["latest"]:
+            actor = self._v651_query_actor(query)
+            if str(actor.get("type") or "unknown") != "unknown":
+                scoped = self._v651_matches_for_actor(matches, actor)
+                if not scoped:
+                    return self._v651_unknown_actor_property(actor, "when")
+                first = scoped[0]
+
             event_start = first.get("event_start")
             if not event_start:
-                return None
+                return self._v651_unknown_actor_property(actor, "when")
             relative = self._relative_label(event_start)
             formatted = self._format_date_fr(event_start)
             when = (
@@ -1767,9 +1957,16 @@ class PersonalMemoryV2:
             return f"C'était {when}."
 
         if plan["intent"] == "until":
+            actor = self._v651_query_actor(query)
+            if str(actor.get("type") or "unknown") != "unknown":
+                scoped = self._v651_matches_for_actor(matches, actor)
+                if not scoped:
+                    return self._v651_unknown_actor_property(actor, "when")
+                first = scoped[0]
+
             event_end = first.get("event_end")
             if not event_end:
-                return None
+                return self._v651_unknown_actor_property(actor, "when")
             relative = self._relative_label(event_end)
             formatted = self._format_date_fr(event_end)
             temporal_expression = self._clean(first.get("temporal_expression", ""))
@@ -1781,7 +1978,67 @@ class PersonalMemoryV2:
             return f"D'après ce que tu m'as dit, jusqu'au {formatted}."
 
         if plan["intent"] == "where":
+            actor = self._v651_query_actor(query)
+            actor_type = str(actor.get("type") or "unknown")
             places: list[str] = []
+
+            if actor_type == "person":
+                # Un aéroport présent dans le même événement peut être le lieu
+                # où TOI tu as emmené la personne. Ce n'est pas sa destination.
+                # On exige donc un vrai déplacement de cette personne.
+                for item in matches:
+                    for fact in self._v651_actor_facts(
+                        item,
+                        actor,
+                        predicates={"aller"},
+                    ):
+                        place = self._clean(
+                            fact.get("place") or fact.get("object_text") or ""
+                        )
+                        if place and place not in places:
+                            places.append(place)
+
+                    if not places:
+                        explicit = self._v651_explicit_person_destination(
+                            item,
+                            str(actor.get("name") or ""),
+                        )
+                        if explicit and explicit not in places:
+                            places.append(explicit)
+
+                if not places:
+                    return self._v651_unknown_actor_property(actor, "where")
+
+                name = str(actor.get("name") or "cette personne")
+                if len(places) == 1:
+                    return (
+                        f"Le lieu enregistré pour {name} est "
+                        f"{self._place_destination_phrase(places[0])}."
+                    )
+                return (
+                    f"J'ai plusieurs destinations enregistrées pour {name} : "
+                    + ", ".join(places[:4])
+                    + "."
+                )
+
+            if actor_type == "user":
+                for item in matches:
+                    for fact in self._v651_actor_facts(item, actor):
+                        place = self._clean(fact.get("place") or "")
+                        if place and place not in places:
+                            places.append(place)
+
+                if not places:
+                    return self._v651_unknown_actor_property(actor, "where")
+                if len(places) == 1:
+                    return f"Tu es allé {self._place_destination_phrase(places[0])}."
+                return (
+                    "Tu m'as parlé de ces lieux où tu étais : "
+                    + ", ".join(places[:4])
+                    + "."
+                )
+
+            # Aucun acteur résolu : réponse neutre, jamais attribuée arbitrairement.
             for item in matches:
                 for place in item.get("places", []):
                     if place not in places:
@@ -1789,41 +2046,67 @@ class PersonalMemoryV2:
             if not places:
                 return None
             if len(places) == 1:
-                return f"Tu es allé {self._place_destination_phrase(places[0])}."
-            return "Tu m'as parlé de ces lieux : " + ", ".join(places[:4]) + "."
+                return (
+                    "Le lieu correspondant dans ta mémoire est "
+                    f"{self._place_destination_phrase(places[0])}."
+                )
+            return "Les lieux correspondants sont : " + ", ".join(places[:4]) + "."
 
         if plan["intent"] == "how":
+            actor = self._v651_query_actor(query)
+            actor_type = str(actor.get("type") or "unknown")
+
+            if actor_type != "unknown":
+                for item in matches:
+                    for fact in self._v651_actor_facts(
+                        item,
+                        actor,
+                        predicates={"voyager_transport"},
+                    ):
+                        transport = self._clean(
+                            fact.get("object_text") or item.get("transport") or ""
+                        )
+                        if not transport:
+                            continue
+
+                        inferred = bool(
+                            fact.get("inferred")
+                            or item.get("transport_inferred")
+                        )
+
+                        if actor_type == "person":
+                            name = str(actor.get("name") or "cette personne")
+                            if inferred:
+                                return (
+                                    f"Probablement en {transport} pour {name}. "
+                                    "C'est une déduction à partir de ce que tu m'as dit."
+                                )
+                            return (
+                                f"D'après ce que tu m'as dit, {name} "
+                                f"a voyagé en {transport}."
+                            )
+
+                        if inferred:
+                            return (
+                                f"Probablement en {transport}. "
+                                "C'est une déduction à partir de ce que tu m'as dit."
+                            )
+                        return (
+                            f"D'après ce que tu m'as dit, tu as voyagé "
+                            f"en {transport}."
+                        )
+
+                return self._v651_unknown_actor_property(actor, "how")
+
             transport = self._clean(first.get("transport", ""))
             if not transport:
                 return None
-
-            traveler = None
-            for fact in first.get("facts", []):
-                if (
-                    isinstance(fact, dict)
-                    and fact.get("subject_type") == "person"
-                    and fact.get("predicate") in {
-                        "partir_voyage",
-                        "voyager_transport",
-                    }
-                    and fact.get("subject_name")
-                ):
-                    traveler = self._clean(fact.get("subject_name"))
-                    break
-            if not traveler:
-                people = first.get("people", [])
-                traveler = self._clean(people[0]) if people else "Elle"
-
             if first.get("transport_inferred"):
                 return (
-                    f"Probablement en {transport} : tu m'as dit que {traveler} "
-                    "partait en voyage depuis un aéroport. C'est une déduction, "
-                    "pas un détail donné explicitement."
+                    f"Probablement en {transport}. "
+                    "C'est une déduction à partir de ce que tu m'as dit."
                 )
-            return (
-                f"D'après ce que tu m'as dit, {traveler} est partie "
-                f"en {transport}."
-            )
+            return f"Le moyen de transport enregistré est {transport}."
 
         if plan["intent"] == "who":
             normalized_query = plan["normalized"]

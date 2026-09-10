@@ -35,6 +35,7 @@ class Planner:
         "developer",
         "tester",
         "ai_worker",
+        "document_analyst",
     }
 
     FILE_RE = re.compile(
@@ -297,25 +298,59 @@ class Planner:
         ):
             return None
 
+        learning_mode = any(
+            marker in message.lower()
+            for marker in (
+                "apprendre et maîtriser",
+                "apprendre et maitriser",
+                "apprendre ",
+                "maîtriser ",
+                "maitriser ",
+                "se former ",
+            )
+        )
+
+        if learning_mode:
+            return [
+                PlanStep(
+                    title="Effectuer la recherche approfondie",
+                    description=message,
+                    worker="researcher",
+                    depends_on=[],
+                ),
+                PlanStep(
+                    title="Construire la fiche de connaissance",
+                    description=(
+                        "À partir UNIQUEMENT du résultat réel du Researcher, "
+                        "répondre à l'objectif initial et produire une fiche "
+                        "de connaissance technique. Extraire les concepts, "
+                        "API/méthodes/objets/paramètres exacts, procédure, "
+                        "exemples de code soutenus par les sources, permissions, "
+                        "contraintes et incertitudes. Les liens servent de preuves "
+                        "à la fin et ne doivent pas constituer le contenu principal. "
+                        "Objectif initial : "
+                        + message
+                    ),
+                    worker="ai_worker",
+                    depends_on=[
+                        0
+                    ],
+                ),
+            ]
+
         return [
             PlanStep(
-                title=(
-                    "Effectuer la recherche"
-                ),
+                title="Effectuer la recherche",
                 description=message,
                 worker="researcher",
                 depends_on=[],
             ),
             PlanStep(
-                title=(
-                    "Synthétiser les résultats"
-                ),
+                title="Synthétiser les résultats",
                 description=(
-                    "À partir uniquement des résultats "
-                    "réels obtenus par le Researcher, "
-                    "répondre clairement à la demande "
-                    "initiale de l'utilisateur. "
-                    "Ne pas inventer de sources."
+                    "À partir uniquement des résultats réels obtenus par "
+                    "le Researcher, répondre clairement à la demande initiale "
+                    "de l'utilisateur. Ne pas inventer de sources."
                 ),
                 worker="ai_worker",
                 depends_on=[
@@ -632,6 +667,11 @@ tester
 
 ai_worker
 - analyse, synthétise et rédige des réponses.
+
+document_analyst
+- analyse les documents et images déjà autorisés par FileAssistant.
+- extrait des données structurées : factures, dates, montants, entités, tags.
+- ne contourne jamais les autorisations d'accès aux fichiers.
 
 RÈGLES :
 

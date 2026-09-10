@@ -8,6 +8,8 @@ from typing import Any
 from agentos.config import DATA_DIR
 from agentos.storage import JsonStore
 from agentos.personal_memory_v2 import PersonalMemoryV2
+from agentos.personal_profile import PersonalProfileMemory
+from agentos.people_profiles import PeopleProfileMemory
 
 
 class Memory:
@@ -240,6 +242,171 @@ class Memory:
             self.personal_v2 = None
             self.data.setdefault("meta", {})["personal_memory_v2_error"] = str(exc)
             self._save()
+
+        # PERSONAL PROFILE V6.5 — concepts durables séparés des événements.
+        self.profile_v2 = None
+        try:
+            self.profile_v2 = PersonalProfileMemory(
+                DATA_DIR / "personal_profile.db"
+            )
+            migration_profile = self.profile_v2.migrate_legacy(self.data)
+            self.data.setdefault("meta", {})["personal_profile_v65"] = {
+                "schema_version": 1,
+                "migration_seen": migration_profile.get("seen", 0),
+                "migration_imported": migration_profile.get("imported", 0),
+                "updated_at": self._now(),
+            }
+            self.data.get("meta", {}).pop("personal_profile_v65_error", None)
+            self._save()
+        except Exception as exc:
+            self.profile_v2 = None
+            self.data.setdefault("meta", {})["personal_profile_v65_error"] = str(exc)
+            self._save()
+
+        # PEOPLE PROFILES V6.5.2 — profils individuels et alias relationnels.
+        # Cette couche partage personal_profile.db avec PersonalProfileMemory.
+        self.people_v2 = None
+        try:
+            self.people_v2 = PeopleProfileMemory(
+                DATA_DIR / "personal_profile.db",
+                personal_event_store_provider=lambda: getattr(
+                    self,
+                    "personal_v2",
+                    None,
+                ),
+            )
+
+            if self.profile_v2 is not None:
+                self.people_v2.sync_from_profile(self.profile_v2)
+
+            if self.personal_v2 is not None:
+                self.people_v2.sync_from_events(self.personal_v2)
+                # V6.5.2 : Personal Memory V2 sait désormais résoudre
+                # « ma copine » vers le nom canonique de la personne.
+                self.personal_v2.person_reference_resolver = (
+                    self.people_v2.resolve_reference_name
+                )
+
+            self.data.setdefault("meta", {})["people_profiles_v652"] = {
+                "schema_version": 1,
+                "updated_at": self._now(),
+            }
+            self.data.get("meta", {}).pop("people_profiles_v652_error", None)
+            self._save()
+        except Exception as exc:
+            self.people_v2 = None
+            self.data.setdefault("meta", {})["people_profiles_v652_error"] = str(exc)
+            self._save()
+
+    # =========================================================
+    # PERSONAL PROFILE V6.5
+    # =========================================================
+
+    def personal_profile_observe(
+        self,
+        message: str,
+        understanding,
+        *,
+        decision_owner: str = "",
+    ) -> list[dict[str, Any]]:
+        stored: list[dict[str, Any]] = []
+
+        if self.profile_v2 is not None:
+            stored = self.profile_v2.ingest_understanding(
+                message,
+                understanding,
+                decision_owner=decision_owner,
+            )
+
+        # V6.5.2 : les informations concernant une personne sont également
+        # envoyées à son profil individuel. Les questions n'écrivent rien.
+        people = getattr(self, "people_v2", None)
+        if people is not None:
+            try:
+                people.ingest(
+                    message,
+                    understanding,
+                    profile_items=stored,
+                )
+            except Exception:
+                pass
+
+        return stored
+
+    def personal_profile_context(
+        self,
+        query: str,
+        *,
+        limit: int = 14,
+    ) -> str:
+        if self.profile_v2 is None:
+            return "(Personal Profile V6.5 indisponible)"
+        return self.profile_v2.context_for(query, limit=limit)
+
+    def personal_profile_summary(
+        self,
+        category: str | None = None,
+    ) -> str:
+        if self.profile_v2 is None:
+            return "Personal Profile V6.5 indisponible."
+        return self.profile_v2.summary(category=category)
+
+    def personal_profile_status(self) -> str:
+        if self.profile_v2 is None:
+            return "Personal Profile V6.5 indisponible."
+        return self.profile_v2.status_summary()
+
+    def personal_profile_forget(self, query: str) -> int:
+        if self.profile_v2 is None or not str(query or "").strip():
+            return 0
+        return self.profile_v2.forget_matching(query)
+
+
+    # =========================================================
+    # PEOPLE PROFILES V6.5.2
+    # =========================================================
+
+    def personal_person_response(
+        self,
+        message: str,
+    ) -> str | None:
+        people = getattr(self, "people_v2", None)
+        if people is None:
+            return None
+        try:
+            return people.direct_response(message)
+        except Exception:
+            return None
+
+    def personal_people_context(
+        self,
+        message: str,
+    ) -> str:
+        people = getattr(self, "people_v2", None)
+        if people is None:
+            return "(People Profiles V6.5.2 indisponible)"
+        try:
+            return people.context_for(message)
+        except Exception:
+            return "(People Profiles V6.5.2 indisponible)"
+
+    def personal_people_status(self) -> str:
+        people = getattr(self, "people_v2", None)
+        if people is None:
+            return "People Profiles V6.5.2 indisponible."
+        try:
+            return people.status_summary()
+        except Exception:
+            return "People Profiles V6.5.2 indisponible."
+
+    def personal_known_people(self) -> list[str]:
+        people = getattr(self, "people_v2", None)
+        if people is None:
+            return []
+        try:
+            return people.known_people()
+        except Exception:
+            return []
 
     # =========================================================
     # BASIC HELPERS

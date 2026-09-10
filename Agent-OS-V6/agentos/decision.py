@@ -14,6 +14,7 @@ class ActionDecision:
     target: str = ""
     subject: str = ""
     field: str = "none"
+    priority: str = "none"
     confidence: float = 0.0
     allow_web: bool = True
     reason: str = ""
@@ -42,6 +43,7 @@ class ActionDecisionEngine:
         "add",
         "query",
         "complete",
+        "reschedule",
         "remember",
         "research",
         "delegate",
@@ -51,6 +53,7 @@ class ActionDecisionEngine:
     }
     VIEWS = {"todo", "appointment", "event", "program", "none"}
     FIELDS = {"what", "where", "when", "who", "none"}
+    PRIORITIES = {"high", "normal", "low", "none"}
 
     SYSTEM = r"""
 Tu es le sélecteur d'action interne d'Agent-OS.
@@ -85,6 +88,9 @@ Exemples :
 "samedi je dois aller chercher Coralie à l'aéroport"
 => agenda / add / todo / samedi
 
+"reporte cette tâche à demain"
+=> agenda / reschedule / todo / demain
+
 "j'ai rendez-vous chez le dentiste demain à 15h"
 => agenda / add / appointment / demain
 
@@ -118,11 +124,12 @@ d'agenda.
 Réponds avec UN JSON exactement :
 {
   "owner": "agenda|personal_memory|external|agent_work|conversation|operational|unknown",
-  "action": "add|query|complete|remember|research|delegate|chat|status|none",
+  "action": "add|query|complete|reschedule|remember|research|delegate|chat|status|none",
   "view": "todo|appointment|event|program|none",
   "target": "",
   "subject": "",
   "field": "what|where|when|who|none",
+  "priority": "high|normal|low|none",
   "confidence": 0.0,
   "reason": ""
 }
@@ -176,6 +183,7 @@ Réponds avec UN JSON exactement :
                 target=cls._clean(getattr(understanding, "agenda_target", "")),
                 subject=cls._clean(getattr(understanding, "agenda_subject", "")),
                 field=cls._clean(getattr(understanding, "agenda_field", "none")).lower() or "none",
+                priority=cls._clean(getattr(understanding, "agenda_priority", "none")).lower() or "none",
                 confidence=agenda_conf,
                 allow_web=False,
                 reason="UnderstandingEngine a identifié l'agenda.",
@@ -221,6 +229,7 @@ Réponds avec UN JSON exactement :
         action = cls._clean(payload.get("action", "none")).lower()
         view = cls._clean(payload.get("view", "none")).lower()
         field = cls._clean(payload.get("field", "none")).lower()
+        priority = cls._clean(payload.get("priority", "none")).lower()
         if owner not in cls.OWNERS:
             owner = "unknown"
         if action not in cls.ACTIONS:
@@ -229,6 +238,8 @@ Réponds avec UN JSON exactement :
             view = "none"
         if field not in cls.FIELDS:
             field = "none"
+        if priority not in cls.PRIORITIES:
+            priority = "none"
         confidence = cls._clamp(payload.get("confidence", 0.0))
         allow_web = owner == "external"
         return ActionDecision(
@@ -238,6 +249,7 @@ Réponds avec UN JSON exactement :
             target=cls._clean(payload.get("target", ""))[:120],
             subject=cls._clean(payload.get("subject", ""))[:240],
             field=field,
+            priority=priority,
             confidence=confidence,
             allow_web=allow_web,
             reason=cls._clean(payload.get("reason", ""))[:300],
@@ -270,6 +282,90 @@ Réponds avec UN JSON exactement :
             )
         return ActionDecision()
 
+
+    @classmethod
+    def _v6521_personal_agenda_guard(
+        cls,
+        message: str,
+    ) -> ActionDecision | None:
+        """Garde déterministe après UnderstandingEngine pour l'agenda personnel."""
+        raw = cls._clean(message)
+        if not raw:
+            return None
+
+        n = raw.lower()
+        replacements = {
+            "é": "e", "è": "e", "ê": "e", "ë": "e",
+            "à": "a", "â": "a", "ä": "a",
+            "î": "i", "ï": "i", "ô": "o", "ö": "o",
+            "ù": "u", "û": "u", "ü": "u", "ç": "c",
+            "’": "'", "-": " ",
+        }
+        for old, new in replacements.items():
+            n = n.replace(old, new)
+        n = re.sub(r"[^a-z0-9']+", " ", n)
+        n = " ".join(n.split())
+
+        n = re.sub(r"\bauj\b", "aujourd hui", n)
+        n = re.sub(r"\baujd\b", "aujourd hui", n)
+        n = re.sub(r"\bajd\b", "aujourd hui", n)
+        n = re.sub(r"\baujourdhui\b", "aujourd hui", n)
+        n = re.sub(r"\baujoudhui\b", "aujourd hui", n)
+
+        personal = bool(
+            re.search(r"\b(?:moi|mes|mon|ma|je|me)\b", n)
+            or n.startswith(("donne moi ", "rappelle moi ", "affiche moi "))
+        )
+        todo = bool(
+            re.search(
+                r"\b(?:tache|taches|todo|to do|a faire|a accomplir|"
+                r"dois faire|me reste a faire)\b",
+                n,
+            )
+        )
+        program = bool(
+            re.search(r"\b(?:programme|planning|agenda|prevu|j ai quoi)\b", n)
+        )
+        appointment = bool(re.search(r"\b(?:rendez vous|rdv)\b", n))
+
+        if not personal or not (todo or program or appointment):
+            return None
+
+        if re.search(
+            r"\b(?:a paris|a toulouse|a marseille|sorties?|"
+            r"evenements? publics?|que faire a)\b",
+            n,
+        ):
+            return None
+
+        target = ""
+        if "aujourd hui" in n:
+            target = "aujourd'hui"
+        elif "apres demain" in n:
+            target = "après-demain"
+        elif "demain" in n:
+            target = "demain"
+        else:
+            m = re.search(
+                r"\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b",
+                n,
+            )
+            if m:
+                target = m.group(1)
+
+        view = "todo" if todo else ("appointment" if appointment else "program")
+        return ActionDecision(
+            owner="agenda",
+            action="query",
+            view=view,
+            target=target,
+            field="what",
+            confidence=0.96,
+            allow_web=False,
+            reason="Garde V6.5.2.1 : consultation personnelle du planning.",
+            source="semantic_guard",
+        )
+
     def decide(
         self,
         message: str,
@@ -280,6 +376,12 @@ Réponds avec UN JSON exactement :
         inherited = self._from_understanding(understanding)
         if inherited is not None:
             return inherited
+
+        # UnderstandingEngine a déjà analysé le message. Cette garde protège
+        # ensuite les demandes personnelles de planning si l'arbitre LLM hésite.
+        protected_agenda = self._v6521_personal_agenda_guard(message)
+        if protected_agenda is not None:
+            return protected_agenda
 
         broad = ""
         if understanding is not None:

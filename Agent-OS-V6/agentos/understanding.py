@@ -46,6 +46,18 @@ ALLOWED_MEMORY_KINDS = {
     "profile",
 }
 
+# PERSONAL PROFILE EXTRACTION V6.5
+ALLOWED_DURABLE_CATEGORIES = {
+    "profile",
+    "relation",
+    "interest",
+    "project",
+    "goal",
+    "skill",
+    "preference",
+    "habit",
+}
+
 ALLOWED_TONES = {
     "calm",
     "neutral",
@@ -63,6 +75,7 @@ ALLOWED_AGENDA_ACTIONS = {
     "add",
     "query",
     "complete",
+    "reschedule",
     "none",
 }
 
@@ -82,12 +95,29 @@ ALLOWED_AGENDA_FIELDS = {
     "none",
 }
 
+ALLOWED_AGENDA_PRIORITIES = {
+    "high",
+    "normal",
+    "low",
+    "none",
+}
+
 
 @dataclass(frozen=True)
 class MemoryItem:
     kind: str
     content: str
     confidence: float = 0.8
+
+
+@dataclass(frozen=True)
+class DurableProfileItem:
+    category: str
+    subject: str
+    value: str = ""
+    confidence: float = 0.8
+    importance: float = 0.6
+    explicit: bool = True
 
 
 @dataclass
@@ -117,7 +147,11 @@ class Understanding:
     agenda_time: str = ""
     agenda_subject: str = ""
     agenda_field: str = "none"
+    agenda_priority: str = "none"
     agenda_confidence: float = 0.0
+
+    # V6.5 : concepts durables extraits du message utilisateur.
+    durable_items: list[DurableProfileItem] = field(default_factory=list)
 
     memory_items: list[MemoryItem] = field(default_factory=list)
     user_state: dict[str, Any] = field(default_factory=dict)
@@ -192,7 +226,11 @@ Exemples :
 - "est-ce que YAML est difficile à apprendre ?"
   = simple question, learning.requested=false.
 Pour un apprentissage, worker="researcher" et work.requested=true.
-L'objectif doit être actionnable et contenir clairement le nom de la compétence.
+L'objectif doit être actionnable et conserver TOUT le sujet demandé.
+Ne réduis jamais "apprendre comment créer des fils de discussion sur Telegram"
+à "apprendre", "Telegram", "connaissance" ou "acquérir la connaissance".
+Le verbe apprendre décrit l'action ; les mots qui suivent décrivent l'objet réel
+de l'apprentissage et doivent rester présents dans learning.subject/goal.
 
 RÈGLE 4 — SUJET / CONTINUITÉ
 Identifie le sujet du MESSAGE ACTUEL en quelques mots.
@@ -276,6 +314,53 @@ Dans agenda.target, conserve une expression temporelle normalisée mais naturell
 Corrige une petite faute évidente si nécessaire, par exemple "samdi" => "samedi".
 agenda.subject contient seulement le sujet utile, sans recopier toute la phrase.
 
+PRIORITÉ DES TODO :
+- high si l'utilisateur exprime sémantiquement urgence, gravité, importance,
+  caractère critique, essentiel, prioritaire, impératif, pressé ou équivalent ;
+- low s'il exprime le contraire : peu important, pas urgent, secondaire,
+  peut attendre, faible priorité, quand il aura le temps, ou équivalent ;
+- normal seulement si une priorité normale est explicitement demandée ;
+- none si aucune priorité n'est exprimée. Une nouvelle TODO none sera stockée
+  comme priorité normale par l'agenda.
+- "reporte X à demain" est action="reschedule", jamais action="add".
+Exemples :
+"demain je dois appeler le garage, c'est vital" => priority="high" ;
+"je dois ranger le garage, ça peut attendre" => priority="low".
+
+RÈGLE 5D — PROFIL DURABLE V6.5
+En plus des souvenirs épisodiques, extrais les informations RELATIVEMENT
+DURABLES sur l'utilisateur dans durable_items.
+
+Catégories :
+- profile : identité, lieu de vie, métier, logement ou autre fait stable ;
+- relation : personne importante et nature du lien ;
+- interest : centre d'intérêt ou passion explicitement affirmé ;
+- project : projet personnel/professionnel actif ;
+- goal : objectif à moyen/long terme ;
+- skill : compétence ou savoir-faire de l'utilisateur ;
+- preference : préférence durable, y compris communication/outils ;
+- habit : habitude ou routine répétée.
+
+Exemples :
+- "je vis à Brens" => profile, subject="lieu de vie", value="Brens" ;
+- "Coralie est ma copine" => relation, subject="Coralie", value="partenaire" ;
+- "j'adore la domotique" => interest, subject="domotique", value="aime" ;
+- "je développe Agent-OS" => project, subject="Agent-OS", value="projet actif" ;
+- "mon objectif est d'avoir 2200 euros de revenus passifs" => goal ;
+- "je maîtrise le froid et la climatisation" => skill ;
+- "je préfère recevoir les fichiers complets" => preference.
+
+IMPORTANT :
+- durable_items contient uniquement ce que l'utilisateur affirme réellement ;
+- une TODO, un rendez-vous, une humeur temporaire ou un événement ponctuel ne
+  devient pas un trait durable ;
+- une simple question sur un sujet ne prouve pas que c'est un centre d'intérêt ;
+- explicit=true quand l'utilisateur l'affirme. N'invente jamais un intérêt
+  déduit de la fréquence : cette inférence sera faite séparément par V6.5 ;
+- importance mesure seulement à quel point l'information semble centrale dans
+  CE message (0.5 normal, 0.8 très important, 1.0 explicitement principal) ;
+- confidence mesure la confiance d'extraction, pas l'importance.
+
 Les instructions durables sur la façon de répondre sont des préférences :
 - "sois moins enjoué avec moi" -> preference ;
 - "réponds-moi directement" -> preference ;
@@ -320,12 +405,13 @@ Format exact :
   },
   "agenda": {
     "requested": false,
-    "action": "add|query|complete|none",
+    "action": "add|query|complete|reschedule|none",
     "view": "todo|appointment|event|program|none",
     "target": "",
     "time": "",
     "subject": "",
     "field": "what|where|when|who|none",
+    "priority": "high|normal|low|none",
     "confidence": 0.0
   },
   "memory_items": [
@@ -333,6 +419,16 @@ Format exact :
       "type": "episode|fact|preference|habit|relation|profile",
       "content": "...",
       "confidence": 0.0
+    }
+  ],
+  "durable_items": [
+    {
+      "category": "profile|relation|interest|project|goal|skill|preference|habit",
+      "subject": "concept court et stable",
+      "value": "valeur ou description courte",
+      "confidence": 0.0,
+      "importance": 0.0,
+      "explicit": true
     }
   ],
   "user_state": {
@@ -482,6 +578,50 @@ une autre demande, mets false.
         return result
 
     @classmethod
+    def _normalize_durable_items(
+        cls,
+        raw_items: Any,
+    ) -> list[DurableProfileItem]:
+        if not isinstance(raw_items, list):
+            return []
+
+        result: list[DurableProfileItem] = []
+        seen: set[tuple[str, str]] = set()
+        for raw in raw_items[:12]:
+            if not isinstance(raw, dict):
+                continue
+            category = cls._clean(raw.get("category", "")).lower()
+            subject = cls._clean(raw.get("subject", ""))[:180]
+            value = cls._clean(raw.get("value", ""))[:400]
+            confidence = cls._clamp(raw.get("confidence", 0.8))
+            importance = cls._clamp(raw.get("importance", 0.6))
+            explicit = raw.get("explicit", True)
+            explicit = explicit if isinstance(explicit, bool) else True
+
+            if (
+                category not in ALLOWED_DURABLE_CATEGORIES
+                or not subject
+                or confidence < 0.45
+            ):
+                continue
+
+            key = (category, cls._ascii(subject).rstrip(" .!?,;:"))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(
+                DurableProfileItem(
+                    category=category,
+                    subject=subject,
+                    value=value,
+                    confidence=confidence,
+                    importance=importance,
+                    explicit=explicit,
+                )
+            )
+        return result
+
+    @classmethod
     def _normalize_response_style(cls, raw: Any) -> dict[str, Any]:
         if not isinstance(raw, dict):
             return {}
@@ -546,6 +686,7 @@ une autre demande, mets false.
         agenda_time = cls._clean(agenda.get("time", ""))[:40]
         agenda_subject = cls._clean(agenda.get("subject", ""))[:240]
         agenda_field = cls._clean(agenda.get("field", "none")).lower()
+        agenda_priority = cls._clean(agenda.get("priority", "none")).lower()
         agenda_confidence = cls._clamp(agenda.get("confidence", 0.0))
 
         if agenda_action not in ALLOWED_AGENDA_ACTIONS:
@@ -554,12 +695,15 @@ une autre demande, mets false.
             agenda_view = "none"
         if agenda_field not in ALLOWED_AGENDA_FIELDS:
             agenda_field = "none"
+        if agenda_priority not in ALLOWED_AGENDA_PRIORITIES:
+            agenda_priority = "none"
 
         if agenda_confidence < 0.50:
             agenda_requested = False
             agenda_action = "none"
             agenda_view = "none"
             agenda_field = "none"
+            agenda_priority = "none"
 
         if learning_requested:
             requested = True
@@ -654,7 +798,9 @@ une autre demande, mets false.
             agenda_time=agenda_time,
             agenda_subject=agenda_subject,
             agenda_field=agenda_field,
+            agenda_priority=agenda_priority,
             agenda_confidence=agenda_confidence,
+            durable_items=cls._normalize_durable_items(payload.get("durable_items", [])),
             memory_items=cls._normalize_memory_items(payload.get("memory_items", [])),
             user_state=cleaned_state,
             response_style=response_style,
@@ -662,6 +808,128 @@ une autre demande, mets false.
             reason=cls._clean(payload.get("reason", "")),
             source="llm",
         )
+
+
+    # =========================================================
+    # LEARNING OBJECTIVE PRESERVATION V6.6.0.2
+    # =========================================================
+
+    @classmethod
+    def _learning_request_body(
+        cls,
+        message: str,
+    ) -> str:
+        """Conserve le contenu réel demandé après le verbe d'apprentissage.
+
+        Le LLM décide SI c'est une demande d'apprentissage.
+        Le texte utilisateur décide CE QU'Agent-OS doit apprendre.
+        """
+        clean = cls._clean(message)
+        if not clean:
+            return ""
+
+        value = clean
+
+        patterns = (
+            r"^\s*je\s+voudrais\s+apprendre\s+",
+            r"^\s*j[' ]?aimerais\s+apprendre\s+",
+            r"^\s*je\s+veux\s+apprendre\s+",
+            r"^\s*je\s+souhaite\s+apprendre\s+",
+            r"^\s*je\s+voudrais\s+que\s+tu\s+apprennes\s+",
+            r"^\s*j[' ]?aimerais\s+que\s+tu\s+apprennes\s+",
+            r"^\s*je\s+veux\s+que\s+tu\s+apprennes\s+",
+            r"^\s*tu\s+peux\s+apprendre\s+",
+            r"^\s*peux[- ]?tu\s+apprendre\s+",
+            r"^\s*apprends\s+",
+            r"^\s*apprendre\s+",
+            r"^\s*forme[- ]?toi\s+(?:sur\s+)?",
+            r"^\s*te\s+former\s+(?:sur\s+)?",
+        )
+
+        for pattern in patterns:
+            stripped = re.sub(
+                pattern,
+                "",
+                value,
+                count=1,
+                flags=re.IGNORECASE,
+            ).strip(" .!?;:")
+            if stripped != value.strip(" .!?;:"):
+                value = stripped
+                break
+
+        value = cls._clean(value).strip(" .!?;:")
+
+        # Évite les résultats vides ou génériques du type « apprendre ».
+        generic = {
+            "",
+            "apprendre",
+            "connaissance",
+            "la connaissance",
+            "des connaissances",
+            "acquerir la connaissance",
+            "acquérir la connaissance",
+            "une competence",
+            "une compétence",
+        }
+        if cls._ascii(value) in {
+            cls._ascii(item)
+            for item in generic
+        }:
+            return ""
+
+        return value[:500]
+
+    @classmethod
+    def _canonical_learning_objective(
+        cls,
+        message: str,
+        *,
+        fallback_subject: str = "",
+    ) -> tuple[str, str]:
+        body = cls._learning_request_body(message)
+
+        if body:
+            # Le sujet est le contenu complet de la demande, pas seulement
+            # la technologie détectée.
+            subject = body
+            objective = (
+                "Apprendre et maîtriser : "
+                + body
+                + ". Rechercher des sources techniques fiables, "
+                  "comprendre les concepts, API, contraintes et exemples de code, "
+                  "puis conserver une synthèse exploitable par Agent-OS."
+            )
+            return subject, objective
+
+        subject = cls._clean(fallback_subject) or "compétence demandée"
+        objective = (
+            "Apprendre et consolider la compétence "
+            + subject
+            + " à partir de sources fiables, puis la rendre "
+              "réutilisable par les workers d'Agent-OS."
+        )
+        return subject, objective
+
+    @staticmethod
+    def _learning_goal_is_generic(value: str) -> bool:
+        clean = " ".join(str(value or "").strip().lower().split())
+        generic = (
+            "",
+            "apprendre",
+            "acquérir la connaissance",
+            "acquerir la connaissance",
+            "acquérir des connaissances",
+            "acquerir des connaissances",
+            "faire des recherches",
+            "effectuer la recherche",
+            "acquérir la compétence",
+            "acquerir la competence",
+        )
+        if clean in generic:
+            return True
+        return len(clean) < 12
+
 
     @classmethod
     def _extract_learning_subject(cls, normalized: str) -> str:
@@ -881,6 +1149,42 @@ une autre demande, mets false.
             return result
 
         result = self._from_payload(payload)
+
+        # V6.6.0.2 — le LLM peut décider qu'il s'agit d'un apprentissage,
+        # mais il ne peut plus remplacer l'objectif réel par un mot générique.
+        normalized = self._ascii(clean)
+        if (
+            result.learning_requested
+            or self._looks_like_learning_request(normalized)
+        ):
+            subject, objective = self._canonical_learning_objective(
+                clean,
+                fallback_subject=result.learning_subject,
+            )
+
+            result.primary_intent = "learning"
+            result.learning_requested = True
+            result.learning_subject = subject
+            result.learning_confidence = max(
+                result.learning_confidence,
+                0.92,
+            )
+            result.work_requested = True
+            result.work_explicit = True
+            result.work_objective = objective
+            result.worker = "researcher"
+            result.work_confidence = max(
+                result.work_confidence,
+                0.92,
+            )
+            result.confidence = max(
+                result.confidence,
+                0.92,
+            )
+            result.reason = (
+                str(result.reason or "").strip()
+                + " | objectif d'apprentissage préservé depuis le message utilisateur"
+            ).strip(" |")
 
         if result.work_requested and result.work_confidence < 0.58:
             result.work_requested = False

@@ -4,7 +4,9 @@ import re
 import threading
 
 from agentos.approvals import ApprovalManager
+from agentos.config import DATA_DIR
 from agentos.engine import WorkerEngine
+from agentos.document_worker import DocumentAnalysisWorker
 from agentos.llm import LLM, LLMError
 from agentos.memory import Memory
 from agentos.missions import MissionManager
@@ -282,6 +284,13 @@ class Manager:
         self.engine.register(
             AIWorker(
                 self.llm
+            )
+        )
+
+        self.engine.register(
+            DocumentAnalysisWorker(
+                self.llm,
+                DATA_DIR,
             )
         )
 
@@ -1343,6 +1352,107 @@ class Manager:
                 marker + " "
             )
             for marker in starters
+        )
+
+
+    # =========================================================
+    # CONTEXTUAL APPROVAL SAFETY V6.6.0.1
+    # =========================================================
+
+    def _last_assistant_session_message(self) -> str:
+        try:
+            session = list(self.memory.data.get("session", []))
+        except Exception:
+            return ""
+
+        for item in reversed(session):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role", "")).strip().lower() != "assistant":
+                continue
+            content = str(item.get("content", "") or "").strip()
+            if content:
+                return content
+        return ""
+
+    def _approval_context_allows(
+        self,
+        message: str,
+        *,
+        rejection: bool = False,
+    ) -> bool:
+        """Un oui/non seul n'est jamais une commande globale.
+
+        Une validation est acceptée si :
+        - la mission est explicitement citée ; ou
+        - le message contient un verbe d'autorisation/refus explicite ; ou
+        - il existe une approbation en attente ET la réponse précédente de Paul
+          était réellement une demande d'approbation.
+        """
+        value = self._normalize(message)
+        reference = self._extract_mission_reference(message)
+
+        try:
+            pending = list(self.approvals.pending())
+        except Exception:
+            pending = []
+
+        if reference is not None:
+            return bool(pending)
+
+        if rejection:
+            explicit = (
+                "je refuse",
+                "refuse la mission",
+                "refuse cette",
+                "rejette",
+                "je rejette",
+                "annule la mission",
+            )
+        else:
+            explicit = (
+                "j autorise",
+                "j'autorise",
+                "autorise la mission",
+                "autorise cette",
+                "je valide la mission",
+                "valide la mission",
+                "je confirme l autorisation",
+                "je confirme l'autorisation",
+            )
+
+        if any(marker in value for marker in explicit):
+            return bool(pending)
+
+        # « oui », « non », « ok », « go »... ne valent approbation que dans
+        # le tour qui suit une vraie demande d'autorisation.
+        if not pending:
+            return False
+
+        previous = self._normalize(
+            self._last_assistant_session_message()
+        )
+        if not previous:
+            return False
+
+        approval_markers = (
+            "autorisation",
+            "approbation",
+            "autoriser",
+            "autorises",
+            "autorise",
+            "valider cette mission",
+            "validation requise",
+            "attend ton autorisation",
+            "attend une autorisation",
+            "réponds oui",
+            "reponds oui",
+            "oui m-",
+        )
+
+        return any(
+            marker in previous
+            for marker in approval_markers
         )
 
     def _pending_approval_summary(
@@ -2852,15 +2962,23 @@ MESSAGE :
             )
 
         # Approvals
-        if self._looks_like_approval(
-            value
+        if (
+            self._looks_like_approval(value)
+            and self._approval_context_allows(
+                value,
+                rejection=False,
+            )
         ):
             return self._approve(
                 value
             )
 
-        if self._looks_like_rejection(
-            value
+        if (
+            self._looks_like_rejection(value)
+            and self._approval_context_allows(
+                value,
+                rejection=True,
+            )
         ):
             return self._reject(
                 value

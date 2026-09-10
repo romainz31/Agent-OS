@@ -178,6 +178,8 @@ class PersonalManager(CoreManager):
     def _v642_prepare_understanding(
         self,
         message: str,
+        *,
+        cache_message: str | None = None,
     ):
         try:
             result = self.understanding.analyze(message)
@@ -185,10 +187,13 @@ class PersonalManager(CoreManager):
             return None
 
         self._current_understanding = result
-        # CoreManager consommera cette compréhension au lieu de rappeler
-        # Ollama une seconde fois si le message continue jusqu'à super().handle().
+        # V6.6.0.1 : Understanding peut recevoir une relance enrichie par le
+        # contexte, tandis que CoreManager reçoit encore le texte utilisateur
+        # original. Le cache est donc indexé par le message original.
         self._precomputed_understanding = result
-        self._precomputed_understanding_message = str(message or "").strip()
+        self._precomputed_understanding_message = str(
+            cache_message if cache_message is not None else message
+        ).strip()
         return result
 
     @staticmethod
@@ -252,6 +257,201 @@ class PersonalManager(CoreManager):
         if decision is None:
             return "unknown"
         return str(getattr(decision, "owner", "unknown") or "unknown").strip().lower()
+
+    # =========================================================
+    # PERSONAL PROFILE & INTERESTS V6.5
+    # =========================================================
+
+    def _v65_profile_context(
+        self,
+        message: str,
+    ) -> str:
+        normalized = self._v623_chat_normalize(message)
+        broad = any(
+            marker in normalized
+            for marker in (
+                "que sais tu sur moi",
+                "qu est ce que tu sais sur moi",
+                "resume ce que tu sais sur moi",
+                "resume moi ce que tu sais sur moi",
+                "fais moi un resume de ce que tu sais sur moi",
+                "fais un resume sur moi",
+                "decris moi a partir de ce que tu sais",
+            )
+        )
+        try:
+            profile_context = self.memory.personal_profile_context(
+                message,
+                limit=40 if broad else 14,
+            )
+        except Exception:
+            profile_context = "(Personal Profile V6.5 indisponible)"
+
+        try:
+            people_context = self.memory.personal_people_context(message)
+        except Exception:
+            people_context = "(People Profiles V6.5.2 indisponible)"
+
+        if people_context.startswith("(aucun profil de personne"):
+            return profile_context
+
+        return profile_context + "\n\n" + people_context
+
+    def _v65_profile_response(
+        self,
+        message: str,
+    ) -> str | None:
+        normalized = self._v623_chat_normalize(message)
+
+        # V6.5.2 : les questions ou affirmations portant sur une personne
+        # identifiée/aliasée sont résolues avant le LLM conversationnel.
+        if normalized in {
+            "people status",
+            "people profiles status",
+            "profils personnes status",
+            "personnes status",
+        }:
+            return self.memory.personal_people_status()
+
+        try:
+            person_response = self.memory.personal_person_response(message)
+        except Exception:
+            person_response = None
+
+        if person_response is not None:
+            return person_response
+
+        if normalized in {
+            "profile v2 status",
+            "profil v2 status",
+            "personal profile status",
+            "profile status",
+            "profil status",
+        }:
+            return self.memory.personal_profile_status()
+
+        if normalized in {
+            "profile v2",
+            "profil v2",
+            "personal profile",
+            "profil structure",
+            "profil structurel",
+        }:
+            return self.memory.personal_profile_summary()
+
+        category_markers = (
+            ("interest", ("mes centres d interet", "mes interets", "quels sont mes centres d interet")),
+            ("project", ("mes projets", "quels sont mes projets", "mes projets personnels")),
+            ("goal", ("mes objectifs", "quels sont mes objectifs", "mes buts")),
+            ("skill", ("mes competences", "quelles sont mes competences", "ce que je sais faire")),
+            ("preference", ("mes preferences", "quelles sont mes preferences")),
+            ("habit", ("mes habitudes", "quelles sont mes habitudes")),
+            ("relation", ("mes relations", "les personnes importantes pour moi")),
+        )
+        for category, markers in category_markers:
+            matched = [marker for marker in markers if marker in normalized]
+            if not matched:
+                continue
+            exact_command = any(normalized == marker for marker in markers)
+            if exact_command or self._v621_question_like(message):
+                return self.memory.personal_profile_summary(category)
+
+        search_prefixes = (
+            "profile v2 search ",
+            "profil v2 cherche ",
+            "profil v2 recherche ",
+        )
+        for prefix in search_prefixes:
+            if normalized.startswith(prefix):
+                raw = str(message or "").strip()
+                target = raw[len(prefix):].strip() if len(raw) >= len(prefix) else ""
+                if not target:
+                    return "Précise ce que tu veux rechercher dans ton profil."
+                return self.memory.personal_profile_context(target, limit=20)
+
+        broad_summary = any(
+            marker in normalized
+            for marker in (
+                "que sais tu sur moi",
+                "qu est ce que tu sais sur moi",
+                "resume ce que tu sais sur moi",
+                "resume moi ce que tu sais sur moi",
+                "fais moi un resume de ce que tu sais sur moi",
+                "fais un resume sur moi",
+                "decris moi a partir de ce que tu sais",
+            )
+        )
+        if broad_summary:
+            # La synthèse est produite au moment de la demande à partir des
+            # faits structurés actuels, jamais stockée comme un gros texte figé.
+            return self._conversation(message)
+
+        return None
+
+
+    # =========================================================
+    # ELLIPTICAL FOLLOW-UP CONTEXT V6.6.0.1
+    # =========================================================
+
+    def _v6601_contextual_message(
+        self,
+        message: str,
+    ) -> str:
+        """Enrichit seulement les relances courtes qui dépendent du sujet actif.
+
+        Exemples :
+        - « sur telegram ? »
+        - « avec python ? »
+        - « et sur windows ? »
+
+        Le texte original reste celui stocké comme parole utilisateur.
+        L'enrichissement sert uniquement à Understanding / Decision / Research.
+        """
+        raw = str(message or "").strip()
+        if not raw:
+            return raw
+
+        normalized = self._v623_chat_normalize(raw)
+        words = normalized.split()
+
+        qualifier = normalized.startswith(
+            (
+                "sur ",
+                "et sur ",
+                "avec ",
+                "et avec ",
+                "pour ",
+                "et pour ",
+                "plutot sur ",
+                "plutôt sur ",
+                "dans ",
+                "et dans ",
+            )
+        )
+
+        if not qualifier or len(words) > 8:
+            return raw
+
+        try:
+            previous = self._v63_last_user_statement() or ""
+        except Exception:
+            previous = ""
+
+        previous = str(previous).strip()
+        if not previous:
+            return raw
+
+        if self._normalize(previous) == self._normalize(raw):
+            return raw
+
+        return (
+            previous
+            + "\n\nPRÉCISION / CORRECTION DE L'UTILISATEUR : "
+            + raw
+            + "\nInterprète la précision comme portant sur le sujet "
+              "de la demande précédente, pas comme une nouvelle question isolée."
+        )
+
 
     # =========================================================
     # PERSONAL AGENDA / TODO V6.4
@@ -325,6 +525,11 @@ class PersonalManager(CoreManager):
                 )
                 or ""
             ).strip()
+
+            try:
+                count += self.memory.personal_profile_forget(target)
+            except Exception:
+                pass
 
             if count <= 0:
                 if target:
@@ -2162,6 +2367,38 @@ AGENDA PERSONNEL / V6.4
 - N'utilise jamais le Web pour expliquer une tâche que l'utilisateur est
   simplement en train d'ajouter à son agenda.
 
+PROFIL DURABLE / V6.5
+- PERSONAL PROFILE V6.5 contient les informations relativement stables :
+  profil, relations, centres d'intérêt, projets, objectifs, compétences,
+  préférences et habitudes.
+- Une entrée EXPLICITE vient d'une affirmation réelle de l'utilisateur et peut
+  être formulée comme un fait.
+- Une entrée INFÉRÉE vient de sujets récurrents. Formule-la avec prudence :
+  « tu sembles t'intéresser à... », jamais « tu m'as dit que... ».
+- Le nombre de mentions et l'importance servent à choisir ce qui est central,
+  pas à rendre une affirmation plus vraie.
+- Une question isolée sur un thème n'en fait pas automatiquement un centre
+  d'intérêt.
+- Un événement ponctuel reste dans Personal Memory V2 ; une TODO ou un RDV
+  reste dans Agenda. Ne les transforme pas automatiquement en traits durables.
+- Quand l'utilisateur demande un résumé sur lui, synthétise les informations
+  actives par grands thèmes. Ne récite pas les métadonnées techniques.
+
+PROFILS DES PERSONNES / V6.5.2
+- Chaque personne importante possède une identité canonique distincte.
+- Les expressions relationnelles comme « ma copine » sont des alias et doivent
+  être résolues vers cette identité avant de consulter les souvenirs.
+- Exemple : « ma copine = Coralie » signifie que « ma copine », « Coralie » et
+  les questions liées à cette relation ciblent le même profil.
+- Les faits temporaires d'une personne (ex. localisation pendant un voyage)
+  ont une validité temporelle et ne doivent plus être présentés comme actuels
+  après expiration.
+- Un lieu où l'utilisateur a conduit/accompagné une personne n'est PAS la
+  localisation ni la destination de cette personne.
+- Les réponses de Paul ne deviennent jamais des faits sur les proches. Seules
+  les déclarations utilisateur et les souvenirs personnels structurés peuvent
+  alimenter ces profils.
+
 MÉMOIRE PERSONNELLE V2 / V6.3
 - Pour les événements personnels, MÉMOIRE PERSONNELLE V2 / SQLITE V6.3 est la
   source structurée prioritaire. Elle sépare la date vécue de la date où le
@@ -2223,6 +2460,10 @@ RAISONNEMENT PERSONNEL V6.2.2 :
 CHRONOLOGIE PERSONNELLE V6.2.3 :
 
 {self._v623_timeline_context(message)}
+
+PROFIL DURABLE / PERSONAL PROFILE V6.5 :
+
+{self._v65_profile_context(message)}
 
 MÉMOIRE PERSONNELLE V2 / SQLITE V6.3 :
 
@@ -2408,14 +2649,76 @@ MESSAGE COURANT :
             self._track_exchange(value, autonomy_response)
             return autonomy_response
 
+        # =====================================================
+        # SAFE TODO MANAGEMENT V6.6.3.3
+        # =====================================================
+        # Les commandes explicites de gestion des tâches personnelles
+        # sont traitées avant la décision de mission. Si la tâche est
+        # ambiguë, Agenda demande une précision et ne crée rien.
+        agenda = getattr(self, "agenda", None)
+
+        if agenda is not None:
+            try:
+                task_management_response = (
+                    agenda.handle_task_management_command(
+                        value
+                    )
+                )
+            except Exception:
+                task_management_response = None
+
+            if task_management_response is not None:
+                self.memory.add_session(
+                    "user",
+                    value,
+                )
+                self.memory.add_session(
+                    "assistant",
+                    task_management_response,
+                )
+                self._track_exchange(
+                    value,
+                    task_management_response,
+                )
+                return task_management_response
+
         # V6.4.2 — compréhension sémantique AVANT les routeurs spécialisés.
         # Elle permet de reconnaître « je dois faire quoi samedi ? » comme une
         # consultation d'agenda sans dépendre d'une phrase-clé exacte.
-        understanding = self._v642_prepare_understanding(value)
+        # V6.6.0.1 : une relance courte (« sur Telegram ? ») est d'abord
+        # rattachée au sujet utilisateur précédent. On conserve malgré tout
+        # `value` comme message réel dans la mémoire et le fil.
+        semantic_value = self._v6601_contextual_message(
+            value
+        )
+        understanding = self._v642_prepare_understanding(
+            semantic_value,
+            cache_message=value,
+        )
         decision = self._v6421_action_decision(
-            value,
+            semantic_value,
             understanding,
         )
+
+        # V6.5 — après compréhension + décision, extraire seulement les
+        # concepts durables réellement présents dans le message. Cette étape
+        # précède l'exécution mais ne change jamais le propriétaire de l'action.
+        decision_owner_v65 = self._v6421_decision_owner(decision)
+        try:
+            self.memory.personal_profile_observe(
+                value,
+                understanding,
+                decision_owner=decision_owner_v65,
+            )
+        except Exception:
+            pass
+
+        profile_response = self._v65_profile_response(value)
+        if profile_response is not None:
+            self.memory.add_session("user", value)
+            self.memory.add_session("assistant", profile_response)
+            self._track_exchange(value, profile_response)
+            return profile_response
 
         # V6.4.2.1 — la décision centrale prime. Si UnderstandingEngine a
         # oublié le champ agenda, l'arbitre court peut encore reconnaître le
@@ -2493,7 +2796,9 @@ MESSAGE COURANT :
         # dans ResearchGateway à cause d'une formulation imprévue.
         decision_owner = self._v6421_decision_owner(decision)
         if decision_owner == "external":
-            research_response = self._research_response(value)
+            research_response = self._research_response(
+                semantic_value
+            )
         elif decision_owner in {
             "agenda",
             "personal_memory",
@@ -2503,7 +2808,9 @@ MESSAGE COURANT :
         }:
             research_response = None
         else:
-            research_response = self._research_response(value)
+            research_response = self._research_response(
+                semantic_value
+            )
         if research_response is not None:
             research_response = self._sanitize_response_for_user(
                 value,

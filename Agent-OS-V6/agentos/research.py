@@ -199,7 +199,15 @@ class ReliableWorkerResult:
 
 
 class ReliableResearcherWorker:
-    """Researcher de mission utilisant la même recherche robuste que Paul."""
+    """Researcher mission V6.6.0.3.1.
+
+    En mode apprentissage :
+    - formule plusieurs requêtes techniques ;
+    - privilégie les sources officielles ;
+    - lit réellement plusieurs pages ;
+    - extrait leur contenu pertinent ;
+    - produit de la connaissance technique, pas une bibliographie.
+    """
 
     name = "researcher"
 
@@ -208,9 +216,633 @@ class ReliableResearcherWorker:
         self.permissions = permissions
         self.searcher = ResilientWebSearch()
 
-    def execute(self, task) -> ReliableWorkerResult:
-        permission = self.permissions.check("web_search")
-        if permission.decision.value != "allowed":
+    @staticmethod
+    def _learning_like(query: str) -> bool:
+        value = str(query or "").lower()
+        return any(
+            marker in value
+            for marker in (
+                "apprendre et maîtriser",
+                "apprendre et maitriser",
+                "apprendre ",
+                "maîtriser ",
+                "maitriser ",
+                "se former ",
+                "fiche de connaissance",
+            )
+        )
+
+    @staticmethod
+    def _json_list(raw: str) -> list[str]:
+        import json
+
+        text = str(raw or "").strip()
+        text = re.sub(
+            r"^\s*```(?:json)?\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\s*```\s*$",
+            "",
+            text,
+        ).strip()
+
+        start = text.find("[")
+        if start < 0:
+            return []
+
+        try:
+            value, _ = json.JSONDecoder().raw_decode(
+                text[start:]
+            )
+        except Exception:
+            return []
+
+        if not isinstance(value, list):
+            return []
+
+        result: list[str] = []
+
+        for item in value:
+            clean = " ".join(
+                str(item or "").split()
+            ).strip()
+
+            if (
+                clean
+                and clean not in result
+            ):
+                result.append(clean[:240])
+
+        return result[:3]
+
+    def _technical_queries(
+        self,
+        objective: str,
+    ) -> list[str]:
+        result = [
+            str(objective or "").strip()
+        ]
+
+        try:
+            raw = self.llm.chat(
+                (
+                    "OBJECTIF TECHNIQUE À APPRENDRE :\n"
+                    f"{objective}\n\n"
+                    "Retourne exactement 3 requêtes de recherche "
+                    "techniques ciblées permettant de trouver : "
+                    "documentation officielle, concepts exacts, API/méthodes, "
+                    "paramètres, permissions et exemples de code. "
+                    "Conserve obligatoirement le produit/technologie cité. "
+                    "Ne recherche jamais la définition du verbe apprendre. "
+                    "Réponse : tableau JSON de chaînes uniquement."
+                ),
+                system=(
+                    "Tu transformes un objectif technique en requêtes "
+                    "de recherche précises. Tu ne réponds pas encore "
+                    "à l'objectif."
+                ),
+            )
+
+            generated = self._json_list(raw)
+
+        except Exception:
+            generated = []
+
+        for query in generated:
+            if query not in result:
+                result.append(query)
+
+        return [
+            query
+            for query in result
+            if query
+        ][:4]
+
+    @staticmethod
+    def _source_score(
+        source: dict[str, Any],
+    ) -> int:
+        url = str(
+            source.get("url")
+            or ""
+        ).strip()
+
+        title = str(
+            source.get("title")
+            or ""
+        ).lower()
+
+        try:
+            domain = urlparse(
+                url
+            ).netloc.lower()
+        except Exception:
+            domain = ""
+
+        official = {
+            "core.telegram.org",
+            "telegram.org",
+            "docs.python.org",
+            "python.org",
+            "docs.github.com",
+            "developer.mozilla.org",
+            "learn.microsoft.com",
+            "docs.docker.com",
+            "docker.com",
+            "home-assistant.io",
+            "developers.home-assistant.io",
+            "fastapi.tiangolo.com",
+            "docs.ollama.com",
+            "ollama.com",
+        }
+
+        score = 0
+
+        if domain in official:
+            score += 20
+
+        if domain.startswith(
+            (
+                "docs.",
+                "developer.",
+                "developers.",
+            )
+        ):
+            score += 8
+
+        if any(
+            marker in title
+            for marker in (
+                "documentation",
+                "reference",
+                "api",
+            )
+        ):
+            score += 5
+
+        if domain == "github.com":
+            score += 2
+
+        return score
+
+    @staticmethod
+    def _html_text(
+        raw_html: str,
+    ) -> str:
+        from html.parser import HTMLParser
+
+        class Extractor(HTMLParser):
+            BLOCKS = {
+                "p",
+                "div",
+                "section",
+                "article",
+                "main",
+                "li",
+                "ul",
+                "ol",
+                "table",
+                "tr",
+                "td",
+                "th",
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "h6",
+                "pre",
+                "code",
+                "br",
+                "dt",
+                "dd",
+            }
+
+            def __init__(self) -> None:
+                super().__init__(
+                    convert_charrefs=True
+                )
+                self.parts: list[str] = []
+                self.hidden = 0
+
+            def handle_starttag(
+                self,
+                tag,
+                attrs,
+            ):
+                tag = tag.lower()
+
+                if tag in {
+                    "script",
+                    "style",
+                    "noscript",
+                    "svg",
+                }:
+                    self.hidden += 1
+
+                elif (
+                    self.hidden == 0
+                    and tag in self.BLOCKS
+                ):
+                    self.parts.append("\n")
+
+            def handle_endtag(
+                self,
+                tag,
+            ):
+                tag = tag.lower()
+
+                if tag in {
+                    "script",
+                    "style",
+                    "noscript",
+                    "svg",
+                }:
+                    self.hidden = max(
+                        0,
+                        self.hidden - 1,
+                    )
+
+                elif (
+                    self.hidden == 0
+                    and tag in self.BLOCKS
+                ):
+                    self.parts.append("\n")
+
+            def handle_data(
+                self,
+                data,
+            ):
+                if (
+                    self.hidden == 0
+                    and data
+                ):
+                    self.parts.append(data)
+
+        parser = Extractor()
+
+        try:
+            parser.feed(
+                str(raw_html or "")
+            )
+            parser.close()
+        except Exception:
+            pass
+
+        lines: list[str] = []
+
+        for line in "".join(
+            parser.parts
+        ).splitlines():
+            clean = " ".join(
+                line.split()
+            ).strip()
+
+            if clean:
+                lines.append(clean)
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _focus_terms(
+        text: str,
+    ) -> list[str]:
+        stop = {
+            "avec",
+            "dans",
+            "pour",
+            "comment",
+            "créer",
+            "creer",
+            "apprendre",
+            "maîtriser",
+            "maitriser",
+            "rechercher",
+            "sources",
+            "fiables",
+            "comprendre",
+            "exemples",
+            "puis",
+            "des",
+            "les",
+            "une",
+            "sur",
+            "et",
+            "the",
+            "and",
+            "with",
+            "from",
+        }
+
+        result: list[str] = []
+
+        for word in re.findall(
+            r"[A-Za-zÀ-ÿ0-9_.-]{3,}",
+            str(text or ""),
+        ):
+            normalized = (
+                word
+                .lower()
+                .strip("._-")
+            )
+
+            if (
+                normalized
+                and normalized not in stop
+                and normalized not in result
+            ):
+                result.append(normalized)
+
+        return result[:30]
+
+    @classmethod
+    def _focused_excerpt(
+        cls,
+        page_text: str,
+        focus: str,
+        *,
+        limit: int = 10000,
+    ) -> str:
+        clean = str(
+            page_text or ""
+        ).strip()
+
+        if len(clean) <= limit:
+            return clean
+
+        terms = cls._focus_terms(
+            focus
+        )
+
+        paragraphs = [
+            " ".join(
+                value.split()
+            ).strip()
+            for value in re.split(
+                r"\n+",
+                clean,
+            )
+            if " ".join(
+                value.split()
+            ).strip()
+        ]
+
+        scored: list[
+            tuple[int, int]
+        ] = []
+
+        technical_markers = (
+            "api",
+            "method",
+            "parameter",
+            "request",
+            "response",
+            "function",
+            "class",
+            "example",
+            "code",
+            "bot",
+            "topic",
+            "thread",
+            "forum",
+            "message",
+            "permission",
+            "python",
+        )
+
+        for index, paragraph in enumerate(
+            paragraphs
+        ):
+            lowered = paragraph.lower()
+
+            keyword_hits = sum(
+                1
+                for term in terms
+                if term in lowered
+            )
+
+            technical_hits = sum(
+                1
+                for marker in technical_markers
+                if marker in lowered
+            )
+
+            score = (
+                keyword_hits * 5
+                + min(
+                    technical_hits,
+                    6,
+                )
+            )
+
+            if score > 0:
+                scored.append(
+                    (
+                        score,
+                        index,
+                    )
+                )
+
+        chosen: set[int] = set()
+
+        for _, index in sorted(
+            scored,
+            reverse=True,
+        )[:28]:
+            for candidate in (
+                index - 1,
+                index,
+                index + 1,
+            ):
+                if (
+                    0
+                    <= candidate
+                    < len(paragraphs)
+                ):
+                    chosen.add(candidate)
+
+        if not chosen:
+            return clean[:limit]
+
+        result: list[str] = []
+        size = 0
+
+        for index in sorted(chosen):
+            paragraph = paragraphs[index]
+
+            if (
+                size
+                + len(paragraph)
+                + 1
+                > limit
+            ):
+                continue
+
+            result.append(paragraph)
+            size += (
+                len(paragraph)
+                + 1
+            )
+
+        return (
+            "\n".join(result)
+            or clean[:limit]
+        )
+
+    def _read_page(
+        self,
+        source: dict[str, Any],
+        *,
+        focus: str,
+    ) -> dict[str, Any]:
+        url = str(
+            source.get("url")
+            or ""
+        ).strip()
+
+        result = {
+            "id": source.get("id"),
+            "title": source.get("title"),
+            "url": url,
+            "ok": False,
+            "excerpt": "",
+            "error": "",
+        }
+
+        if not url.startswith(
+            (
+                "http://",
+                "https://",
+            )
+        ):
+            result["error"] = (
+                "URL non HTTP."
+            )
+            return result
+
+        try:
+            import requests
+
+            response = requests.get(
+                url,
+                timeout=12,
+                allow_redirects=True,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 "
+                        "Agent-OS-Researcher/6.6.0.3.1"
+                    )
+                },
+            )
+
+            response.raise_for_status()
+
+            content_type = str(
+                response.headers.get(
+                    "content-type",
+                    "",
+                )
+            ).lower()
+
+            if not any(
+                marker in content_type
+                for marker in (
+                    "text/",
+                    "application/json",
+                    "application/xml",
+                    "application/xhtml",
+                )
+            ):
+                result["error"] = (
+                    "Contenu non textuel."
+                )
+                return result
+
+            raw = response.text
+
+            if (
+                "html" in content_type
+                or "<html" in raw[:500].lower()
+            ):
+                page = self._html_text(raw)
+            else:
+                page = raw
+
+            excerpt = self._focused_excerpt(
+                page,
+                focus,
+            )
+
+            if len(
+                excerpt.strip()
+            ) < 100:
+                result["error"] = (
+                    "Page lisible mais "
+                    "contenu utile insuffisant."
+                )
+                return result
+
+            result["ok"] = True
+            result["url"] = str(
+                response.url
+            )
+            result["excerpt"] = excerpt
+            return result
+
+        except Exception as exc:
+            result["error"] = str(exc)[:300]
+            return result
+
+    def _deep_reads(
+        self,
+        sources: list[dict[str, Any]],
+        *,
+        focus: str,
+        limit: int = 4,
+    ) -> list[dict[str, Any]]:
+        ranked = sorted(
+            enumerate(sources),
+            key=lambda pair: (
+                -self._source_score(
+                    pair[1]
+                ),
+                pair[0],
+            ),
+        )
+
+        result: list[
+            dict[str, Any]
+        ] = []
+
+        for _, source in ranked:
+            if len(result) >= limit:
+                break
+
+            read = self._read_page(
+                source,
+                focus=focus,
+            )
+
+            if read.get("ok"):
+                result.append(read)
+
+        return result
+
+    def execute(
+        self,
+        task,
+    ) -> ReliableWorkerResult:
+        permission = self.permissions.check(
+            "web_search"
+        )
+
+        if (
+            permission.decision.value
+            != "allowed"
+        ):
             return ReliableWorkerResult(
                 False,
                 "Recherche Web interdite.",
@@ -218,71 +850,274 @@ class ReliableResearcherWorker:
                 "permission",
             )
 
-        query = str(task.get("description", "") or "").strip()
+        objective = str(
+            task.get(
+                "description",
+                "",
+            )
+            or ""
+        ).strip()
+
+        learning_mode = (
+            self._learning_like(
+                objective
+            )
+        )
+
+        queries = (
+            self._technical_queries(
+                objective
+            )
+            if learning_mode
+            else [objective]
+        )
+
+        raw: list[dict[str, Any]] = []
+        attempts: list[
+            dict[str, Any]
+        ] = []
+        seen: set[str] = set()
+
         try:
-            raw, attempts = self.searcher.search(query, max_results=8)
+            for query in queries:
+                found, current_attempts = (
+                    self.searcher.search(
+                        query,
+                        max_results=8,
+                    )
+                )
+
+                attempts.extend(
+                    current_attempts
+                )
+
+                for item in found:
+                    if not isinstance(
+                        item,
+                        dict,
+                    ):
+                        continue
+
+                    url = str(
+                        item.get("href")
+                        or item.get("url")
+                        or ""
+                    ).strip()
+
+                    key = (
+                        url
+                        or (
+                            str(
+                                item.get(
+                                    "title"
+                                )
+                                or ""
+                            )
+                            + "|"
+                            + str(
+                                item.get(
+                                    "body"
+                                )
+                                or ""
+                            )[:100]
+                        )
+                    )
+
+                    if (
+                        not key
+                        or key in seen
+                    ):
+                        continue
+
+                    seen.add(key)
+                    raw.append(item)
+
+                if len(raw) >= (
+                    12
+                    if learning_mode
+                    else 8
+                ):
+                    break
+
         except Exception as exc:
             return ReliableWorkerResult(
                 False,
                 "Recherche Web échouée.",
-                {"search_attempts": []},
+                {
+                    "search_attempts": attempts,
+                    "search_queries": queries,
+                },
                 str(exc),
             )
 
         if not raw:
-            errors = [
-                item.get("error", "")
-                for item in attempts
-                if not item.get("ok") and item.get("error")
-            ]
-            detail = errors[-1] if errors else "Aucun résultat exploitable."
             return ReliableWorkerResult(
                 False,
-                "Recherche Web échouée : aucune source exploitable.",
-                {"search_attempts": attempts},
-                detail,
+                (
+                    "Recherche Web échouée : "
+                    "aucune source exploitable."
+                ),
+                {
+                    "search_attempts": attempts,
+                    "search_queries": queries,
+                },
+                "Aucun résultat exploitable.",
             )
 
-        sources = []
+        raw = raw[
+            :(
+                12
+                if learning_mode
+                else 8
+            )
+        ]
+
+        sources: list[
+            dict[str, Any]
+        ] = []
+
         for item in raw:
-            url = str(item.get("href") or item.get("url") or "").strip()
+            url = str(
+                item.get("href")
+                or item.get("url")
+                or ""
+            ).strip()
+
             if not url:
                 continue
+
             sources.append(
                 {
-                    "id": f"S{len(sources) + 1}",
-                    "title": str(item.get("title", "") or "").strip(),
+                    "id": (
+                        f"S{len(sources) + 1}"
+                    ),
+                    "title": str(
+                        item.get("title")
+                        or ""
+                    ).strip(),
                     "url": url,
-                    "body": str(item.get("body") or item.get("snippet") or "").strip(),
+                    "body": str(
+                        item.get("body")
+                        or item.get("snippet")
+                        or ""
+                    ).strip(),
                 }
             )
 
+        deep_reads: list[
+            dict[str, Any]
+        ] = []
+
+        if learning_mode:
+            deep_reads = self._deep_reads(
+                sources,
+                focus=(
+                    objective
+                    + " "
+                    + " ".join(queries)
+                ),
+                limit=4,
+            )
+
+        by_id = {
+            str(
+                item.get("id")
+            ): item
+            for item in deep_reads
+        }
+
+        chunks: list[str] = []
+
+        for source in sources:
+            source_id = str(
+                source["id"]
+            )
+
+            read = by_id.get(
+                source_id
+            )
+
+            if read is not None:
+                evidence = (
+                    "CONTENU RÉEL LU :\n"
+                    + str(
+                        read.get("excerpt")
+                        or ""
+                    )
+                )
+            else:
+                evidence = (
+                    "SNIPPET DU MOTEUR :\n"
+                    + str(
+                        source.get("body")
+                        or ""
+                    )
+                )
+
+            chunks.append(
+                (
+                    f"[{source_id}] "
+                    f"{source['title']}\n"
+                    f"{evidence}\n"
+                    f"URL : {source['url']}"
+                )
+            )
+
         context = "\n\n".join(
-            f"[{s['id']}] {s['title']}\n{s['body']}\n{s['url']}"
-            for s in sources
+            chunks
         )
+
+        if learning_mode:
+            instruction = (
+                "MISSION D'APPRENTISSAGE TECHNIQUE.\n"
+                "Réponds à l'objectif en extrayant la connaissance "
+                "contenue dans les pages. Le résultat principal ne doit "
+                "PAS être une liste de sites.\n\n"
+                "Structure attendue :\n"
+                "1. Réponse directe et faisabilité\n"
+                "2. Concepts et fonctionnement\n"
+                "3. API, méthodes, objets, champs et paramètres exacts\n"
+                "4. Procédure pratique étape par étape\n"
+                "5. Exemple minimal de code si les sources le permettent\n"
+                "6. Permissions, prérequis, limites et pièges\n"
+                "7. Ce qui reste incertain\n"
+                "8. Sources de preuve brièvement à la fin\n\n"
+                "Cite [Sx] après les faits techniques importants."
+            )
+        else:
+            instruction = (
+                "Synthétise en français et cite [S1], [S2]. "
+                "N'invente aucun fait ni aucune source."
+            )
 
         try:
             answer = self.llm.chat(
                 (
-                    "QUESTION:\n"
-                    f"{query}\n\n"
-                    "RÉSULTATS WEB RÉELS:\n"
+                    "OBJECTIF :\n"
+                    f"{objective}\n\n"
+                    "DONNÉES WEB RÉELLES :\n"
                     f"{context}\n\n"
-                    "Synthétise en français et cite [S1], [S2]. "
-                    "N'invente aucun fait ni aucune source."
+                    f"{instruction}"
                 ),
                 system=(
-                    "Tu es le Researcher d'Agent-OS. Utilise uniquement les "
-                    "résultats Web fournis. Si un point n'est pas établi par "
-                    "les sources, dis-le explicitement."
+                    "Tu es le Researcher d'Agent-OS. "
+                    "Utilise uniquement les contenus fournis. "
+                    "Une URL n'est pas une connaissance : "
+                    "extrais les informations techniques de la page. "
+                    "Quand l'information n'est pas établie, dis-le."
                 ),
             )
+
         except Exception as exc:
             return ReliableWorkerResult(
                 False,
                 "Synthèse impossible.",
-                {"sources": sources, "search_attempts": attempts},
+                {
+                    "sources": sources,
+                    "search_attempts": attempts,
+                    "search_queries": queries,
+                    "deep_read_sources": deep_reads,
+                },
                 str(exc),
             )
 
@@ -293,6 +1128,16 @@ class ReliableResearcherWorker:
                 "worker": self.name,
                 "sources": sources,
                 "search_attempts": attempts,
+                "learning_mode": learning_mode,
+                "search_queries": queries,
+                "deep_read_sources": [
+                    {
+                        "id": item.get("id"),
+                        "title": item.get("title"),
+                        "url": item.get("url"),
+                    }
+                    for item in deep_reads
+                ],
             },
         )
 
