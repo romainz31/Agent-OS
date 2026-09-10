@@ -1,166 +1,143 @@
-AGENT-OS V5.4.1 — APPRENTISSAGE AUTONOME
-=========================================
+AGENT-OS V5.5 — ARTIFACTS ET BUILD RÉEL
+=======================================
 
-Cette mise à jour se pose PAR-DESSUS V5.3.
-Remplace les fichiers du ZIP en conservant leur arborescence.
+Cette mise à jour se pose PAR-DESSUS V5.4.1.
 
-NOUVEAUTÉS V5.4.1
+OBJECTIF
+--------
+
+Permettre à Paul de recevoir une demande orientée résultat, par exemple :
+
+  crée un .exe qui ouvre une boite de dialogue avec ecris "coucou coralie"
+
+sans obliger l'utilisateur à fournir lui-même un chemin de fichier complet.
+
+NOUVEAUTÉS V5.5
 ---------------
 
-1. Préparation avant worker
-   Le moteur peut maintenant différer une tâche AVANT de la passer RUNNING.
-   Le worker ne consomme donc aucun slot pendant sa formation.
+1. Création d'artefacts .exe
+   Le Developer reconnaît maintenant les demandes de création d'exécutables
+   Windows et ne traite plus un .exe comme un simple fichier texte.
 
-2. Détection automatique prudente de skills
-   Exemples détectés sans "skill require" manuel :
-   - .yaml / .yml -> yaml
-   - .py -> python
-   - Home Assistant -> home_assistant
-   - MQTT -> mqtt
-   - Frigate -> frigate
-   - Docker, FastAPI, Telegram, Ollama, GitHub, ZHA, etc.
-   Les skills déjà connus du registre sont aussi détectés lorsqu'ils sont
-   explicitement cités dans la demande.
+2. Nom automatique
+   Si aucun nom complet n'est fourni, Agent-OS choisit un nom raisonnable.
+   Exemple :
 
-3. Apprentissage Researcher autonome
-   Si un skill requis :
-   - n'existe pas ;
-   - a une confiance effective < 0.50 ;
-   - est périmé / non documenté ;
-   alors une tâche "Apprentissage autonome — <skill>" est créée pour Researcher.
+   "coucou coralie" -> workspace/dist/coucou_coralie.exe
 
-4. Dépendance réelle
-   La tâche métier dépend de la tâche Researcher. Elle reprend automatiquement
-   seulement lorsque l'apprentissage a été validé.
+3. Source intermédiaire réel
+   Le Developer crée un source Python réel dans :
 
-5. Validation documentaire + pertinence
-   Un apprentissage n'est accepté que si les sources parlent réellement du
-   skill ciblé ET si elles fournissent :
-   - au moins une source A/B pertinente ; OU
-   - au moins deux sources C pertinentes provenant de domaines indépendants.
-   Pour les noms ambigus comme Frigate, un contexte technique (NVR, caméra,
-   MQTT, Docker, Home Assistant, docs.frigate.video...) est aussi exigé.
-   Une source fiable mais hors sujet ne compte jamais.
+   workspace/applications/
 
-6. Niveau de confiance prudent
-   Le Researcher ne s'auto-proclame jamais expert. Un apprentissage Web crée en
-   général un skill basique ou intermédiaire, avec une confiance calculée depuis
-   la qualité et le nombre de sources.
+4. Build PyInstaller réel
+   Le source est transformé en véritable exécutable Windows via PyInstaller.
+   Aucun shell arbitraire n'est ouvert au Developer.
 
-7. Pas de régression du savoir manuel
-   Si un skill existant a déjà un meilleur niveau ou une meilleure confiance,
-   un apprentissage automatique ne les baisse pas.
+5. Permissions dédiées
+   Deux permissions étroites sont ajoutées :
 
-8. Transfert inter-workers
-   Un skill frais et fiable déjà appris pour Developer peut être attribué à
-   Tester sans nouvelle recherche Web quand Tester en a besoin.
+   - build_artifact
+   - run_artifact_test
 
-9. Mutualisation
-   Deux tâches de la MÊME mission qui ont simultanément besoin du même skill
-   partagent la même tâche Researcher.
+   Les protections existantes restent en place :
 
-10. Requête Web ciblée
-   Les tâches d'apprentissage n'envoient plus toute la grosse consigne métier
-   au moteur de recherche. Une requête courte et technique est générée, et les
-   moteurs Web généraux sont essayés avant Wikipedia.
+   - shell_command reste BLOCKED
+   - install_software reste BLOCKED
 
-11. Rejet des synthèses non concluantes
-   Si le Researcher écrit lui-même « aucune source pertinente », « aucune
-   information pertinente », « sources insuffisantes », etc., le skill n'est
-   jamais promu même si plusieurs URL ont été trouvées.
+6. Cas boîte de dialogue déterministe
+   Pour une demande simple de boîte de dialogue avec un texte explicite,
+   Agent-OS génère directement un petit programme tkinter fiable sans demander
+   au LLM d'inventer la structure du code.
 
-12. Migration corrective
-   Au démarrage, les anciens skills appris automatiquement avec une synthèse
-   non concluante ou uniquement des sources hors sujet sont mis en quarantaine :
-   niveau novice, confiance <= 0.20, validation retirée. La prochaine mission
-   déclenche donc un nouvel apprentissage.
+7. Self-test intégré
+   Les exécutables produits contiennent un mode :
 
-13. Persistance
-   - data/skills.json : connaissances techniques
-   - data/learning.json : historique d'apprentissage
-   - data/learning_state.json : activation/désactivation
+   --self-test
 
-COMMANDES
+   Ce mode n'ouvre pas la fenêtre et permet au Tester de vérifier le binaire.
+
+8. Tester binaire
+   Le Tester ne tente plus de lire un .exe comme du texte.
+   Il vérifie :
+
+   - présence réelle du fichier ;
+   - signature MZ ;
+   - signature PE ;
+   - taille et SHA-256 ;
+   - exécution réelle du --self-test.
+
+9. Planner déterministe
+   Une demande simple de création de .exe produit directement :
+
+   Developer -> Tester
+
+   sans appel LLM inutile pour le planning.
+
+10. Nettoyage Git
+    Les sorties temporaires et exécutables générés sont ignorés :
+
+    workspace/.agentos_build/
+    workspace/dist/
+
+DÉPENDANCE AJOUTÉE
+------------------
+
+PyInstaller >= 6.15.0
+
+Cette branche supporte Python 3.14.
+
+INSTALLATION
+------------
+
+Depuis v3\Agent-OS-Final :
+
+python -m pip install -r requirements.txt
+
+TEST V5.5
 ---------
 
-learning status
-learning history
-learning on
-learning off
+python .\test_v55.py
 
-Telegram :
-/learning
-/learninghistory
-/learning_on
-/learning_off
+Le test vérifie notamment :
 
-API :
-GET /api/learning
-GET /api/learning/history
-
-TESTS
------
-
-PowerShell :
-
-python .\test_v50.py
-python .\test_v51.py
-python .\test_v52.py
-python .\test_v53.py
-python .\test_v54.py
-python .\test_telegram_commands.py
-
-Résultats attendus :
-- V5.0 : 37 contrôles
-- V5.1 : 47 contrôles
-- V5.2 : 52 contrôles
-- V5.3 : 47 contrôles
-- V5.4.1 : 77 contrôles
-- Telegram : tous les contrôles passent
-
-Puis :
-
-python -u .\api_server.py
-python -u .\telegram_client.py
+- la nouvelle permission de build ;
+- le maintien du blocage du shell ;
+- le plan Developer -> Tester ;
+- l'inférence de dist/coucou_coralie.exe ;
+- le source tkinter déterministe ;
+- la validation syntaxique ;
+- le rejet d'un faux .exe texte ;
+- sur Windows avec PyInstaller : build réel, signatures MZ/PE et self-test réel.
 
 TEST RÉEL CONSEILLÉ
 -------------------
 
-Après redémarrage, vérifie d'abord l'ancien skill Frigate :
+Redémarre Agent-OS puis demande à Paul :
 
-skill frigate
+  crée un .exe qui ouvre une boite de dialogue avec ecris "coucou coralie"
 
-Le mauvais apprentissage montré avant ce correctif doit être mis en
-quarantaine (niveau novice / confiance basse, validation retirée).
+Résultat attendu :
 
-Relance ensuite une mission Frigate :
+1. Paul crée une mission avec Developer puis Tester.
+2. Aucune erreur explicit_path_missing.
+3. Le Developer crée un source sous workspace/applications/.
+4. PyInstaller crée workspace/dist/coucou_coralie.exe.
+5. Le Tester confirme un vrai binaire PE et exécute --self-test.
+6. En lançant manuellement l'exécutable, une boîte affiche "coucou coralie".
 
-Crée workspace/frigate_test_2.yaml avec un exemple de configuration Frigate
-pour Home Assistant avec MQTT.
+IMPORTANT
+---------
 
-Pendant le travail :
+V5.5 n'autorise pas le Developer à lancer des commandes shell arbitraires.
+Le builder PyInstaller est codé explicitement et ne prend pas une commande libre
+produite par le LLM.
 
-learning status
-workload status
+LIMITES V5.5
+------------
 
-Puis :
-
-learning history
-skill frigate
-
-Cette fois, Frigate ne doit redevenir basique/intermédiaire QUE si les sources
-retenues parlent réellement de Frigate technique. Une recherche hors sujet doit
-échouer et empêcher le Developer de reprendre.
-
-LIMITES VOLONTAIRES V5.4.1
-------------------------
-
-- La détection automatique reste conservatrice : elle ne demande pas au LLM du
-  scheduler d'inventer librement des noms de compétences.
-- Pour une technologie inconnue de la table de détection et absente du registre,
-  "skill require M-XXX nom_du_skill" reste disponible.
-- Le Researcher apprend depuis les résultats Web sourcés qu'il possède déjà ;
-  une future version pourra extraire le contenu complet des pages officielles.
-- V5.4.1 traite l'apprentissage AVANT le travail. La collaboration inter-agents
-  en plein milieu d'une tâche (Developer -> Researcher -> Developer) sera la
-  prochaine brique de la roadmap.
+- Le builder .exe fonctionne sur Windows ; PyInstaller n'est pas un
+  cross-compilateur.
+- Cette première version construit les exécutables depuis Python.
+- Les futurs artefacts (zip, PDF, installateur MSI, image Docker, etc.) pourront
+  être ajoutés avec le même modèle : builder dédié + permissions dédiées + tests.

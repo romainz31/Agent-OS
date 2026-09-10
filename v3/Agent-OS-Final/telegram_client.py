@@ -54,6 +54,10 @@ BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "learninghistory", "description": "Historique des apprentissages"},
     {"command": "learning_on", "description": "Active l'apprentissage autonome"},
     {"command": "learning_off", "description": "Désactive l'apprentissage autonome"},
+    {"command": "collaboration", "description": "État de l'entraide entre agents"},
+    {"command": "collaborationhistory", "description": "Historique des renforts inter-agents"},
+    {"command": "collaboration_on", "description": "Active la collaboration inter-agents"},
+    {"command": "collaboration_off", "description": "Désactive la collaboration inter-agents"},
     {"command": "workload", "description": "Charge globale et workers"},
     {"command": "backlog", "description": "Tâches en attente"},
     {"command": "workers", "description": "État des workers"},
@@ -510,7 +514,7 @@ class TelegramAgentOS:
             "/research Lady Di — lance une vraie recherche\n"
             "/researchhistory — historique des recherches\n\n"
 
-            "COMPÉTENCES / SPÉCIALISTES / LEARNING V5.4\n"
+            "COMPÉTENCES / SPÉCIALISTES / LEARNING / COLLABORATION V5.5\n"
             "/skills — liste le Skill Registry\n"
             "/skill yaml — détail d'une compétence\n"
             "/skill add yaml — crée une compétence\n"
@@ -521,7 +525,11 @@ class TelegramAgentOS:
             "/learning — état de l'apprentissage autonome\n"
             "/learninghistory — historique des apprentissages\n"
             "/learning_on — active l'apprentissage autonome\n"
-            "/learning_off — désactive l'apprentissage autonome\n\n"
+            "/learning_off — désactive l'apprentissage autonome\n"
+            "/collaboration — état de l'entraide entre agents\n"
+            "/collaborationhistory — historique des renforts\n"
+            "/collaboration_on — active la collaboration\n"
+            "/collaboration_off — désactive la collaboration\n\n"
 
             "WORKLOAD / ARBRES V5\n"
             "/workload — charge globale et disponibilité\n"
@@ -602,6 +610,10 @@ class TelegramAgentOS:
             "learninghistory": "learning history",
             "learning_on": "learning on",
             "learning_off": "learning off",
+            "collaboration": "collaboration status",
+            "collaborationhistory": "collaboration history",
+            "collaboration_on": "collaboration on",
+            "collaboration_off": "collaboration off",
             "workload": "workload status",
             "backlog": "backlog",
             "workers": "workers status",

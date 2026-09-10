@@ -8,13 +8,14 @@ from agentos.hierarchy import MissionHierarchy
 from agentos.skills import SkillRegistry
 from agentos.specialists import SpecialistManager, SpecializedWorkerAdapter
 from agentos.learning import SkillLearningManager, LearningResearcherAdapter
+from agentos.collaboration import CollaborationManager, CollaborativeWorkerAdapter
 from agentos.runtime import AgentOSRuntime as CoreRuntime
 
 
 class AutonomousRuntime(CoreRuntime):
-    """Runtime Agent-OS V5.4.1 : autonomie + workload + hiérarchie + skills + spécialistes + apprentissage."""
+    """Runtime Agent-OS V5.5 : autonomie + workload + hiérarchie + skills + apprentissage + collaboration."""
 
-    VERSION = "5.4.1"
+    VERSION = "5.5"
 
     def _recover_active_work(self) -> dict[str, Any]:
         # CoreRuntime.__init__ appelle cette méthode avant que les contrôleurs
@@ -93,7 +94,7 @@ class AutonomousRuntime(CoreRuntime):
                 )
             )
 
-        # V5.4.1 : le contrôleur d'apprentissage intervient AVANT le lancement
+        # V5.5 : le contrôleur d'apprentissage intervient AVANT le lancement
         # réel d'une tâche. Un skill manquant crée une dépendance Researcher ;
         # le worker métier n'occupe donc aucun slot pendant sa formation.
         self.learning = SkillLearningManager(
@@ -117,6 +118,31 @@ class AutonomousRuntime(CoreRuntime):
                     researcher,
                     self.learning,
                 )
+            )
+
+        # V5.5 : enveloppe finale de collaboration. Elle se place après la
+        # spécialisation et l'adaptateur Learning du Researcher afin de pouvoir
+        # suspendre proprement n'importe quel worker, créer un renfort et le
+        # reprendre ensuite avec la réponse du collègue.
+        self.collaboration = CollaborationManager(
+            self.manager,
+            max_requests_per_task=2,
+        )
+        for worker_name, worker in list(
+            self.manager.engine.workers.items()
+        ):
+            if isinstance(worker, CollaborativeWorkerAdapter):
+                continue
+            self.manager.engine.register(
+                CollaborativeWorkerAdapter(
+                    worker,
+                    self.collaboration,
+                )
+            )
+
+        if hasattr(self.manager.engine, "set_collaboration_handler"):
+            self.manager.engine.set_collaboration_handler(
+                self.collaboration.handle_request
             )
 
         # La récupération historique avait été différée pendant
@@ -269,7 +295,7 @@ class AutonomousRuntime(CoreRuntime):
         }
 
     # =========================================================
-    # V5.4.1 AUTONOMOUS LEARNING
+    # V5.5 AUTONOMOUS LEARNING
     # =========================================================
 
     def learning_status(self) -> dict[str, Any]:
@@ -282,6 +308,23 @@ class AutonomousRuntime(CoreRuntime):
             return [
                 dict(item)
                 for item in self.learning.data.get("history", [])
+                if isinstance(item, dict)
+            ]
+
+    # =========================================================
+    # V5.5 INTER-AGENT COLLABORATION
+    # =========================================================
+
+    def collaboration_status(self) -> dict[str, Any]:
+        result = self.collaboration.snapshot()
+        result["available"] = True
+        return result
+
+    def collaboration_history(self) -> list[dict[str, Any]]:
+        with self.collaboration.lock:
+            return [
+                dict(item)
+                for item in self.collaboration.data.get("history", [])
                 if isinstance(item, dict)
             ]
 
@@ -342,6 +385,11 @@ class AutonomousRuntime(CoreRuntime):
                 self.learning.snapshot()
             )
 
+        if hasattr(self, "collaboration"):
+            result["collaboration"] = (
+                self.collaboration.snapshot()
+            )
+
         return result
 
     def handle_message(
@@ -351,6 +399,18 @@ class AutonomousRuntime(CoreRuntime):
         value = str(
             message
         ).strip()
+
+        collaboration_response = (
+            self.collaboration.command_response(
+                value
+            )
+        )
+        if collaboration_response is not None:
+            return {
+                "response": collaboration_response,
+                "handled_by": "collaboration",
+                "status": self.status(),
+            }
 
         learning_response = (
             self.learning.command_response(

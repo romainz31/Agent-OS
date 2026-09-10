@@ -77,6 +77,10 @@ check("learning" in names, "/learning présent")
 check("learninghistory" in names, "/learninghistory présent")
 check("learning_on" in names, "/learning_on présent")
 check("learning_off" in names, "/learning_off présent")
+check("collaboration" in names, "/collaboration présent")
+check("collaborationhistory" in names, "/collaborationhistory présent")
+check("collaboration_on" in names, "/collaboration_on présent")
+check("collaboration_off" in names, "/collaboration_off présent")
 check("priority" in names, "/priority présent")
 check("deadline" in names, "/deadline présent")
 check("pause" in names, "/pause présent")
@@ -198,6 +202,30 @@ message, error = obj._command_forward(
 check(message == "learning off" and error is None, "/learning_off traduit correctement")
 
 message, error = obj._command_forward(
+    "collaboration",
+    "",
+)
+check(message == "collaboration status" and error is None, "/collaboration traduit correctement")
+
+message, error = obj._command_forward(
+    "collaborationhistory",
+    "",
+)
+check(message == "collaboration history" and error is None, "/collaborationhistory traduit correctement")
+
+message, error = obj._command_forward(
+    "collaboration_on",
+    "",
+)
+check(message == "collaboration on" and error is None, "/collaboration_on traduit correctement")
+
+message, error = obj._command_forward(
+    "collaboration_off",
+    "",
+)
+check(message == "collaboration off" and error is None, "/collaboration_off traduit correctement")
+
+message, error = obj._command_forward(
     "workload",
     "",
 )
@@ -277,6 +305,9 @@ check("/specialist M-043" in help_text, "/help documente profil spécialiste")
 check("/learning" in help_text, "/help documente apprentissage autonome")
 check("/learninghistory" in help_text, "/help documente historique learning")
 check("/learning_on" in help_text, "/help documente activation learning")
+check("/collaboration" in help_text, "/help documente collaboration inter-agents")
+check("/collaborationhistory" in help_text, "/help documente historique collaboration")
+check("/collaboration_on" in help_text, "/help documente activation collaboration")
 check("/priority M-043 haute" in help_text, "/help donne exemple priorité")
 check("/deadline M-043 dans 2h" in help_text, "/help donne exemple deadline")
 check("/workload" in help_text, "/help documente workload")

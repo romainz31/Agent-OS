@@ -6,14 +6,14 @@ from fastapi import Query, Request
 from agentos.personal_manager import PersonalManager
 
 # ============================================================
-# MANAGER + RUNTIME UPGRADE V5.4.1
+# MANAGER + RUNTIME UPGRADE V5.5
 # ============================================================
 #
-# V5.4.1 conserve V5.3 et ajoute l'apprentissage autonome :
-# - détection prudente des compétences techniques ;
-# - tâche Researcher créée avant le worker si un skill manque ;
-# - validation de la qualité des sources ;
-# - Skill Registry mis à jour avant reprise automatique.
+# V5.5 conserve l'apprentissage autonome V5.4.1 et ajoute :
+# - demandes de renfort structurées entre workers ;
+# - tâche d'aide réelle dans le backlog ;
+# - reprise automatique du worker avec le contexte du collègue ;
+# - garde-fous anti-boucle et historique des collaborations.
 
 import agentos.runtime as runtime_module
 
@@ -25,10 +25,10 @@ runtime_module.AgentOSRuntime = AutonomousRuntime
 
 from agentos import api as api_module
 
-api_module.APP_VERSION = "5.4.1"
-api_module.app.version = "5.4.1"
+api_module.APP_VERSION = "5.5"
+api_module.app.version = "5.5"
 api_module.app.description = (
-    "Backend local d'Agent-OS V5.4.1 avec Manager relationnel, mémoire "
+    "Backend local d'Agent-OS V5.5 avec Manager relationnel, mémoire "
     "personnelle, conversation persistante, recherche factuelle, autonomie, "
     "workload multi-missions, arbres de sous-missions et Skill Registry persistant."
 )
@@ -255,6 +255,39 @@ def learning_history(
 
 
 # ============================================================
+# COLLABORATION API — V5.5
+# ============================================================
+
+
+@api_module.app.get(
+    "/api/collaboration",
+    tags=["Collaboration"],
+)
+def collaboration_status(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    return runtime.collaboration_status()
+
+
+@api_module.app.get(
+    "/api/collaboration/history",
+    tags=["Collaboration"],
+)
+def collaboration_history(
+    request: Request,
+) -> dict:
+    runtime = api_module.runtime_from(
+        request
+    )
+    return {
+        "items": runtime.collaboration_history()
+    }
+
+
+# ============================================================
 # CONVERSATION API
 # ============================================================
 
@@ -319,7 +352,7 @@ def research_history(
 
 def main() -> None:
     print("=" * 64)
-    print("AGENT-OS V5.4.1 — AUTONOMOUS LEARNING")
+    print("AGENT-OS V5.5 — INTER-AGENT COLLABORATION")
     print("=" * 64)
 
     print("\nCe processus est le cerveau unique d'Agent-OS.")
@@ -331,6 +364,7 @@ def main() -> None:
     print("Skills      : http://127.0.0.1:8765/api/skills")
     print("Spécialistes: http://127.0.0.1:8765/api/specialists")
     print("Learning    : http://127.0.0.1:8765/api/learning")
+    print("Collaboration: http://127.0.0.1:8765/api/collaboration")
     print("Conversation: http://127.0.0.1:8765/api/conversation")
     print("Recherche   : http://127.0.0.1:8765/api/research")
     print("Docs        : http://127.0.0.1:8765/docs")
@@ -345,8 +379,12 @@ def main() -> None:
         "les héritent et le moteur injecte leur contexte technique au worker."
     )
     print(
-        "V5.4.1 détecte aussi des besoins techniques évidents : si un skill est "
-        "absent, faible ou périmé, Researcher se documente avant la reprise du worker."
+        "V5.4.1 détecte les besoins techniques : si un skill est absent, faible "
+        "ou périmé, Researcher se documente avant la reprise du worker."
+    )
+    print(
+        "V5.5 permet aussi aux workers de demander un renfort ponctuel à un "
+        "collègue, puis de reprendre automatiquement avec sa réponse."
     )
     print("Ne lance qu'un seul api_server.py.\n")
 

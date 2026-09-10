@@ -11,7 +11,7 @@ from agentos.tasks import TaskStatus
 
 
 class WorkerEngine:
-    """Moteur d'exécution avec file d'attente pilotée V5.4.
+    """Moteur d'exécution avec file d'attente pilotée V5.5.
 
     V5.0 ajoute :
     - une vraie file d'attente avant ThreadPoolExecutor ;
@@ -95,6 +95,13 @@ class WorkerEngine:
             | None
         ) = None
 
+        # V5.5 : lorsqu'un worker demande l'aide d'un collègue, le résultat
+        # spécial est transformé en vraie tâche de renfort + dépendance.
+        self.collaboration_handler: (
+            Callable[[Any, Any], dict[str, Any]]
+            | None
+        ) = None
+
         self.stop_event = threading.Event()
         self.dispatch_thread = threading.Thread(
             target=self._dispatch_loop,
@@ -175,6 +182,15 @@ class WorkerEngine:
         """
         with self.condition:
             self.preparation_provider = provider
+            self.condition.notify_all()
+
+    def set_collaboration_handler(
+        self,
+        handler: Callable[[Any, Any], dict[str, Any]] | None,
+    ) -> None:
+        """Branche le coordinateur de collaboration V5.5."""
+        with self.condition:
+            self.collaboration_handler = handler
             self.condition.notify_all()
 
     def wake_scheduler(self) -> None:
@@ -1202,6 +1218,56 @@ class WorkerEngine:
                 task_id
             )
 
+            return
+
+        # V5.5 : un worker peut suspendre sa propre tâche pour demander un
+        # renfort. Le coordinateur crée alors une tâche auxiliaire et remet la
+        # tâche métier en WAITING_DEPENDENCY.
+        result_data = (
+            result.data
+            if isinstance(getattr(result, "data", None), dict)
+            else {}
+        )
+        collaboration_request = result_data.get("collaboration_request")
+        if isinstance(collaboration_request, dict):
+            if self.collaboration_handler is None:
+                outcome = {
+                    "scheduled": False,
+                    "reason": "Aucun coordinateur de collaboration disponible.",
+                }
+            else:
+                try:
+                    outcome = self.collaboration_handler(
+                        current,
+                        result,
+                    ) or {}
+                except Exception as exc:
+                    outcome = {
+                        "scheduled": False,
+                        "reason": str(exc),
+                    }
+
+            if outcome.get("scheduled"):
+                self.wake_scheduler()
+                return
+
+            error = str(
+                outcome.get(
+                    "reason",
+                    "Demande de collaboration impossible.",
+                )
+            )
+            self.tasks.update(
+                task_id,
+                status=TaskStatus.FAILED.value,
+                result=result.message,
+                result_data=result_data,
+                error=error,
+            )
+            self.notifier(
+                f"✗ {task_id} : collaboration impossible ({error})"
+            )
+            self.resume_dependents(task_id)
             return
 
         if self._is_non_validated_test(
