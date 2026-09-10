@@ -25,6 +25,49 @@ class Checks(unittest.TestCase):
     def test_restart(self):
         self.j.add('filtre','2026-05-01')
         self.assertEqual(len(LifeJournal(self.a).rows('2026-01-01','2026-09-10')),1)
+    def test_natural_jai_list_is_stored_and_recalled(self):
+        answer=self.j.handle("aujourdhui jai nettoyé la fontaine a chats, les toilettes, la machine a café")
+        self.assertIn("tu as nettoyé la fontaine a chats",answer)
+        rows=self.j.completed_rows('2026-09-10','2026-09-10')
+        self.assertEqual([row['title'] for row in rows],[
+            'nettoyé la fontaine a chats',
+            'nettoyé les toilettes',
+            'nettoyé la machine a café',
+        ])
+        recall=self.j.handle("j'ai fait quoi comme taches aujourdhui?")
+        self.assertIn('tu as fait 3 choses',recall.lower())
+        self.assertIn('nettoyé la machine a café',recall)
+
+    def test_timeline_uses_agenda_items_as_single_store(self):
+        self.j.handle("jai nettoyé la fontaine a chats")
+        self.a._add_item(kind='todo',title='nettoyer la piscine',due_date=date(2026,9,14),start_time=None,source_text='lundi je dois nettoyer la piscine')
+        self.a._add_item(kind='appointment',title='dentiste',due_date=date(2026,9,14),start_time='15:00',source_text='rdv dentiste lundi à 15h')
+        with self.a._connect() as db:
+            kinds={row['kind'] for row in db.execute('SELECT kind FROM agenda_items').fetchall()}
+            legacy=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='life_events'").fetchone()
+        self.assertTrue({'action','todo','appointment'} <= kinds)
+        self.assertIsNone(legacy)
+        monday=self.j.timeline_rows('2026-09-14','2026-09-14')
+        self.assertEqual({row['kind'] for row in monday},{'todo','appointment'})
+
+    def test_legacy_life_events_are_migrated_once(self):
+        with tempfile.TemporaryDirectory() as t:
+            agenda=PersonalAgenda(Path(t)/'agenda.db',now_provider=lambda:self.now)
+            with agenda._connect() as db:
+                db.execute("CREATE TABLE life_events(id INTEGER PRIMARY KEY, day TEXT NOT NULL, title TEXT NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL, created TEXT NOT NULL)")
+                db.execute('INSERT INTO life_events VALUES(1,?,?,?,?,?)',(
+                    '2026-09-09','nettoyé le filtre','action','ancien journal',self.now.isoformat()))
+            timeline=LifeJournal(agenda)
+            self.assertEqual(len(timeline.completed_rows('2026-09-09','2026-09-09')),1)
+            LifeJournal(agenda)
+            with agenda._connect() as db:
+                count=db.execute("SELECT COUNT(*) FROM agenda_items WHERE kind='action'").fetchone()[0]
+            self.assertEqual(count,1)
+
+    def test_non_action_jai_is_not_logged(self):
+        self.assertIsNone(self.j.handle("jai faim"))
+        self.assertEqual(self.j.completed_rows('2026-09-10','2026-09-10'),[])
+
     def test_count_months(self):
         self.j.add('nettoyé le filtre','2026-06-09')
         self.j.add('nettoyé le filtre','2026-06-10')

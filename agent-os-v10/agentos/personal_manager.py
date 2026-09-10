@@ -137,10 +137,15 @@ class PersonalManager(CoreManager):
         except Exception:
             self.agenda = None
 
+        # V10.2 : Timeline personnelle unique. L'agenda_items existant devient
+        # la source centrale pour tâches, rendez-vous, événements, actions faites
+        # et ressentis. ``life_journal`` reste un alias de compatibilité V10.1.
+        from agentos.personal_timeline import PersonalTimeline
+        self.timeline = PersonalTimeline(self.agenda) if self.agenda else None
+        self.life_journal = self.timeline
+
         # V6.4.2.1 : arbitrage court des capacités après UnderstandingEngine.
         # Il n'exécute rien lui-même : il choisit seulement le propriétaire.
-        from agentos.life_journal import LifeJournal
-        self.life_journal = LifeJournal(self.agenda) if self.agenda else None
         self.action_decider = ActionDecisionEngine(self.llm)
         self._current_action_decision = None
 
@@ -535,6 +540,18 @@ class PersonalManager(CoreManager):
             return agenda.context_for(message)
         except Exception:
             return "(agenda personnel indisponible)"
+
+    def _v102_timeline_context(
+        self,
+        message: str,
+    ) -> str:
+        timeline = getattr(self, "timeline", None)
+        if timeline is None:
+            return "(Timeline personnelle indisponible)"
+        try:
+            return timeline.context_for(message)
+        except Exception:
+            return "(Timeline personnelle indisponible)"
 
     # =========================================================
     # MEMORY ACTIONS
@@ -2418,18 +2435,24 @@ RAPPEL PERSONNEL / VIE PRIVÉE
 - Une nouvelle déclaration personnelle n'est jamais une invitation à reprendre
   une ancienne demande sans rapport. Réponds au nouveau message, puis arrête-toi.
 
-AGENDA PERSONNEL / V6.4
+TIMELINE PERSONNELLE / V10.2
+- La Timeline est la source centrale de la vie quotidienne : tâches à faire,
+  rendez-vous, événements, actions accomplies et ressentis datés.
 - Une liste de choses que l'utilisateur dit devoir faire est une TODO LIST,
   pas une demande de mission Agent-OS et pas une recherche Internet.
-- Les tâches, rendez-vous et événements planifiés sont trois catégories
-  distinctes. Ne les mélange pas.
-- « mon programme aujourd'hui/demain » doit réunir les rendez-vous, les tâches
-  ouvertes et les événements notables du jour.
+- « j'ai fait... » décrit une action accomplie. Elle doit être retrouvable ensuite
+  avec « qu'est-ce que j'ai fait aujourd'hui ? », même si elle n'était pas prévue.
+- Si l'action correspond à une tâche ouverte, marque cette tâche comme faite au
+  lieu de créer un doublon. Une même chose ne doit apparaître qu'une fois.
+- Les tâches, rendez-vous, événements, actions et ressentis gardent des types
+  distincts, mais ils appartiennent tous à la même chronologie personnelle.
+- « mon programme aujourd'hui/demain » réunit ce qui est prévu. « ma Timeline »
+  peut réunir ce qui était prévu et ce qui a réellement été fait.
 - Une tâche terminée ne doit plus apparaître dans « ce qu'il me reste à faire ».
 - Une tâche personnelle (« je dois nettoyer le filtre ») concerne l'utilisateur.
   Une demande adressée à Paul (« refais-moi mon dashboard ») reste une mission.
 - N'utilise jamais le Web pour expliquer une tâche que l'utilisateur est
-  simplement en train d'ajouter à son agenda.
+  simplement en train d'ajouter à sa Timeline.
 
 PROFIL DURABLE / V6.5
 - PERSONAL PROFILE V6.5 contient les informations relativement stables :
@@ -2533,7 +2556,11 @@ MÉMOIRE PERSONNELLE V2 / SQLITE V6.3 :
 
 {self._v63_personal_memory_context(message)}
 
-AGENDA PERSONNEL V6.4 :
+TIMELINE PERSONNELLE V10.2 :
+
+{self._v102_timeline_context(message)}
+
+AGENDA / COMPATIBILITÉ V6.4 :
 
 {self._v64_agenda_context(message)}
 
@@ -2689,14 +2716,14 @@ MESSAGE COURANT :
         if not value:
             return ""
 
-        journal = getattr(self, "life_journal", None)
-        if journal is not None:
-            journal_response = journal.handle(value)
-            if journal_response is not None:
+        timeline = getattr(self, "timeline", None) or getattr(self, "life_journal", None)
+        if timeline is not None:
+            timeline_response = timeline.handle(value)
+            if timeline_response is not None:
                 self.memory.add_session("user", value)
-                self.memory.add_session("assistant", journal_response)
-                self._track_exchange(value, journal_response)
-                return journal_response
+                self.memory.add_session("assistant", timeline_response)
+                self._track_exchange(value, timeline_response)
+                return timeline_response
 
         conversation_response = (
             self._conversation_command_response(value)

@@ -11,7 +11,7 @@ def main():
         from fastapi.testclient import TestClient
         import api_server
         with TestClient(api_server.api_module.app) as client:
-            for url in ['/api/health','/api/life','/api/documents/exports','/']:
+            for url in ['/api/health','/api/life','/api/timeline','/api/documents/exports','/']:
                 assert client.get(url).status_code==200, url
             r=client.post('/api/documents/upload',files={'file':('../../invoice.txt',b'Invoice total 120 EUR')},data={'objective':'recapitulatif Excel'})
             assert r.status_code==200 and 'M-' in r.json()['response']
@@ -19,8 +19,9 @@ def main():
             assert client.post('/api/documents/upload',files={'file':('run.exe',b'x')}).status_code==400
             assert client.post('/api/documents/upload',files={'file':('empty.txt',b'')}).status_code==413
             r=client.post('/api/chat',json={'message':'Journal : arrosé les plantes; nettoyé la cuisine'})
-            assert r.status_code==200 and "C'est noté pour aujourd'hui" in r.json()['response']
+            assert r.status_code==200 and "pour aujourd'hui" in r.json()['response']
             assert len(client.get('/api/life').json()['events'])==2
+            assert len(client.get('/api/timeline').json()['timeline'])==2
             assert client.get('/api/life?start=incorrect').status_code==400
 
             headers={'X-AgentOS-Client':'test-photo-client'}

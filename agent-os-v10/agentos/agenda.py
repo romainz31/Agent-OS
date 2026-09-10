@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+
+from agentos.sqlite_utils import connect as sqlite_connect
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -170,8 +172,7 @@ class PersonalAgenda:
         if self.now_provider is not None:
             value = self.now_provider()
         else:
-            from zoneinfo import ZoneInfo
-            value = datetime.now(ZoneInfo('Europe/Paris'))
+            value = datetime.now().astimezone()
         if value.tzinfo is None:
             return value.astimezone()
         return value
@@ -1731,7 +1732,7 @@ class PersonalAgenda:
     # =========================================================
 
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(str(self.db_path), timeout=10.0)
+        db = sqlite_connect(str(self.db_path), timeout=10.0)
         db.row_factory = sqlite3.Row
         return db
 
@@ -1795,18 +1796,8 @@ class PersonalAgenda:
         today = ref.date()
         n = cls.normalize(message)
 
-        # Preserve date punctuation; normalize() deliberately strips slashes.
-        numeric = cls._ascii(message)
-        iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", numeric)
-        if iso:
-            result = date(*map(int, iso.groups()))
-            return AgendaDate(result, result.strftime("%d/%m/%Y"))
-        if "avant hier" in n:
-            return AgendaDate(today - timedelta(days=2), "avant-hier")
-        if re.search(r"\bhier\b", n):
-            return AgendaDate(today - timedelta(days=1), "hier")
         # Explicit numeric date: 15/09, 15/09/2026, 15-09-2026.
-        m = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", numeric)
+        m = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", n)
         if m:
             day = int(m.group(1))
             month = int(m.group(2))
@@ -1923,7 +1914,6 @@ class PersonalAgenda:
         metadata = dict(metadata or {})
 
         if kind == "todo":
-            metadata.setdefault("backlog_undated", self.resolve_date(source_text, reference=self._now()) is None)
             priority_override = metadata.pop("priority_override", None)
             priority_explicit = bool(metadata.pop("priority_explicit", False))
             incoming_priority = int(priority_override) if priority_override in (-1, 0, 1) else self._priority_from_text(source_text)

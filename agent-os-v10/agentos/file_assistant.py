@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+
+from agentos.sqlite_utils import connect as sqlite_connect
 import stat
 import threading
 import time
@@ -174,7 +176,7 @@ class FileAssistant:
             raise RuntimeError('Opération interrompue.')
 
     def connect(self):
-        return sqlite3.connect(self.db, timeout=15)
+        return sqlite_connect(str(self.db), timeout=15)
 
     def job(self, jid, status, detail):
         with self.connect() as c:

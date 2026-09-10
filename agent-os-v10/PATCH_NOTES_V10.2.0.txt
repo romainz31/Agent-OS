@@ -1,0 +1,97 @@
+AGENT-OS V10.2.0 — TIMELINE PERSONNELLE CENTRALE
+
+Installation sur V10.1.0
+========================
+
+1. Arrêter Agent-OS / api_server / Telegram.
+2. Par sécurité, copier data/agenda.db avant la première relance.
+3. Extraire Agent-OS-V10.2.0-PATCH.zip dans le dossier agent-os-v10.
+4. Accepter le remplacement des fichiers.
+5. Relancer Agent-OS normalement.
+
+Aucune dépendance supplémentaire.
+Le correctif ne contient aucun dossier data/ ou workspace/ : les données existantes
+ne sont pas écrasées.
+
+Architecture V10.2
+==================
+
+agenda_items devient la source centrale de la Timeline personnelle :
+
+- kind=todo         : tâche à faire ou tâche terminée
+- kind=appointment  : rendez-vous
+- kind=event        : événement planifié
+- kind=action       : action réellement accomplie
+- kind=mood         : ressenti daté
+
+L'ancienne table V10.1 life_events n'est plus utilisée pour les nouvelles écritures.
+Si elle existe déjà, son contenu est migré UNE seule fois dans agenda_items au premier
+lancement de V10.2. La table legacy n'est pas supprimée : elle reste comme sauvegarde.
+
+Comportements ajoutés
+=====================
+
+Exemple naturel :
+
+  aujourdhui jai nettoyé la fontaine a chats, les toilettes, la machine a café
+
+V10.2 enregistre trois actions distinctes :
+
+- nettoyé la fontaine a chats
+- nettoyé les toilettes
+- nettoyé la machine a café
+
+Puis :
+
+  j'ai fait quoi comme taches aujourdhui?
+
+renvoie réellement ces trois actions.
+
+Le verbe est propagé dans les listes naturelles :
+"j'ai nettoyé la cuisine, les toilettes et la machine à café" ne produit plus
+"les toilettes" comme information isolée.
+
+Si une action correspond à une TODO ouverte, la TODO est marquée terminée et aucune
+copie supplémentaire n'est créée.
+
+Les phrases comme "jai faim" ne sont pas enregistrées comme tâches accomplies.
+
+Exemple agenda + Timeline :
+
+  lundi je dois nettoyer la piscine
+  rdv chez le dentiste lundi à 15h
+  timeline lundi
+
+La Timeline réunit le rendez-vous et la tâche dans une seule vue.
+
+API / interface
+===============
+
+Nouvelle route : GET /api/timeline
+Ancienne route : GET /api/life conservée pour compatibilité.
+
+Le bouton Web "Vie quotidienne" devient "Ma Timeline".
+La recherche affiche dans la même vue tâches, rendez-vous, événements, actions et
+ressentis.
+
+Compatibilité
+=============
+
+- life_journal.py reste présent comme couche de compatibilité.
+- manager.life_journal reste un alias vers manager.timeline.
+- les anciennes commandes "Journal : ..." continuent de fonctionner.
+- "journal supprimer N" continue de fonctionner sur les éléments migrés/nouveaux.
+- les missions, workers, documents et Agent Zero ne sont pas modifiés par ce patch.
+
+Tests conseillés après installation
+===================================
+
+1. aujourdhui jai nettoyé la fontaine a chats, les toilettes, la machine a café
+2. j'ai fait quoi comme taches aujourdhui?
+3. lundi je dois nettoyer la piscine
+4. rdv chez le dentiste lundi à 15h
+5. timeline lundi
+6. jai faim
+7. j'ai fait quoi aujourd'hui ?
+
+Le point 6 ne doit rien ajouter à la Timeline.

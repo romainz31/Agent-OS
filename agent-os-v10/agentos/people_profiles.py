@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import sqlite3
+
+from agentos.sqlite_utils import connect as sqlite_connect
 import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -185,7 +187,7 @@ class PeopleProfileMemory:
     # =========================================================
 
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(str(self.db_path), timeout=10.0)
+        db = sqlite_connect(str(self.db_path), timeout=10.0)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
         return db

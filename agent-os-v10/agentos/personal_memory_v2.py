@@ -4,6 +4,8 @@ import hashlib
 import json
 import re
 import sqlite3
+
+from agentos.sqlite_utils import connect as sqlite_connect
 import unicodedata
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
@@ -228,7 +230,7 @@ class PersonalMemoryV2:
     # =========================================================
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
+        connection = sqlite_connect(
             str(self.db_path),
             timeout=10.0,
         )

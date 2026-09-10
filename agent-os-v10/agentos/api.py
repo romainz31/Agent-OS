@@ -820,18 +820,34 @@ def recovery(
     }
 
 
-@app.get('/api/life')
-def life(request: Request, start: str = '1970-01-01', end: str = '9999-12-31', q: str = ''):
+def _timeline_payload(request: Request, start: str, end: str, q: str = ''):
     from datetime import date
     try:
-        date.fromisoformat(start); date.fromisoformat(end)
+        date.fromisoformat(start)
+        date.fromisoformat(end)
     except ValueError:
         raise HTTPException(400, 'Dates ISO requises')
     manager = runtime_from(request).manager
-    journal = manager.life_journal
-    journal.rollover()
-    return {'events': journal.rows(start,end,q), 'todos': manager.agenda.backlog_todos(),
-            'today': manager.agenda.program_for_date(manager.agenda._now().date())}
+    timeline = getattr(manager, 'timeline', None) or manager.life_journal
+    timeline.rollover()
+    today = manager.agenda._now().date()
+    return {
+        'timeline': timeline.timeline_rows(start, end, q),
+        # Legacy key kept so V10.1 clients/extensions continue to work.
+        'events': timeline.rows(start, end, q),
+        'todos': manager.agenda.backlog_todos(),
+        'today': timeline.day_summary(today),
+    }
+
+
+@app.get('/api/timeline')
+def timeline(request: Request, start: str = '1970-01-01', end: str = '9999-12-31', q: str = ''):
+    return _timeline_payload(request, start, end, q)
+
+
+@app.get('/api/life')
+def life(request: Request, start: str = '1970-01-01', end: str = '9999-12-31', q: str = ''):
+    return _timeline_payload(request, start, end, q)
 
 
 def attachment_client_key(request: Request) -> str:

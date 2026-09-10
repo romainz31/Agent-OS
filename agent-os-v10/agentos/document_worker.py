@@ -4,6 +4,8 @@ import io
 import json
 import re
 import sqlite3
+
+from agentos.sqlite_utils import connect as sqlite_connect
 from pathlib import Path
 from typing import Any
 
@@ -190,7 +192,7 @@ class DocumentAnalysisWorker(Worker):
     def _rows(self, reference: str) -> list[dict[str, Any]]:
         if not self.db.exists():
             return []
-        with sqlite3.connect(str(self.db), timeout=15) as db:
+        with sqlite_connect(str(self.db), timeout=15) as db:
             db.row_factory = sqlite3.Row
             columns = {row[1] for row in db.execute("PRAGMA table_info(documents)")}
             analysis = "analysis_json" if "analysis_json" in columns else "'{}' AS analysis_json"

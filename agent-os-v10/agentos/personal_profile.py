@@ -5,6 +5,8 @@ import json
 import math
 import re
 import sqlite3
+
+from agentos.sqlite_utils import connect as sqlite_connect
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -132,7 +134,7 @@ class PersonalProfileMemory:
     # =========================================================
 
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(str(self.db_path), timeout=10.0)
+        db = sqlite_connect(str(self.db_path), timeout=10.0)
         db.row_factory = sqlite3.Row
         return db
 
