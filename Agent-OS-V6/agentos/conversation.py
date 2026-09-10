@@ -638,6 +638,72 @@ class ConversationTracker:
 
         return "Je n'ai pas assez de contexte actif pour reprendre précisément le sujet."
 
+
+    # =========================================================
+    # USER-SOURCE CONTEXT V6.2.2
+    # =========================================================
+
+    def user_context_for(
+        self,
+        query: str = "",
+        *,
+        limit: int = 10,
+    ) -> str:
+        """Contexte composé uniquement des déclarations de l'utilisateur.
+
+        Ce flux sert aux questions de mémoire personnelle. Les anciennes
+        réponses de Paul restent dans le fil conversationnel normal mais ne
+        peuvent plus devenir des preuves sur la vie de l'utilisateur.
+        """
+        with self.lock:
+            self._rotate_if_idle()
+            current = self._current()
+            query_state = self.transient_state_kind(query)
+
+            source = [
+                item
+                for item in current.get("messages", [])
+                if (
+                    isinstance(item, dict)
+                    and str(item.get("role", "")).strip().lower() == "user"
+                )
+            ]
+
+            if query_state is None:
+                source = [
+                    item
+                    for item in source
+                    if self._message_kind(item) != "transient_state"
+                ]
+            else:
+                source = [
+                    item
+                    for item in source
+                    if (
+                        self._message_kind(item) != "transient_state"
+                        or str(item.get("state_kind", "")) == query_state
+                    )
+                ]
+
+            messages = source[-max(1, int(limit)):]
+
+            if not messages:
+                return "(aucune déclaration utilisateur dans le fil actif)"
+
+            lines = [
+                "SOURCE UTILISATEUR UNIQUEMENT",
+                "Les lignes ci-dessous sont des déclarations de l'utilisateur, "
+                "pas des affirmations de Paul.",
+                "Déclarations récentes :",
+            ]
+
+            for item in messages:
+                content = self._clean(item.get("content", ""))
+                if content:
+                    lines.append(f"user: {content}")
+
+            return "\n".join(lines)
+
     def context_for(
         self,
         query: str = "",

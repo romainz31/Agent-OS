@@ -1,0 +1,129 @@
+AGENT-OS — V6-Files 1.0
+Module fichiers indépendant des versions de mémoire V6.1 à V6.3
+
+INSTALLATION
+1. Arrête api_server.py avec Ctrl+C.
+2. Décompresse ce ZIP dans ton dossier Agent-OS-V6 (celui contenant api_server.py).
+   Garde le sous-dossier payload avec le script d’installation.
+3. Depuis PowerShell ouvert dans Agent-OS-V6 :
+   python .\APPLY_V6_FILES_1_0.py
+4. Pour PDF, création Word/Excel et validation YAML :
+   python -m pip install -r requirements-documents.txt
+5. Redémarre :
+   python .\api_server.py
+6. Dans Paul (Web, CLI ou Telegram connecté au même serveur) :
+   fichiers aide
+
+Le ZIP contient uniquement ce nouveau module, ses dépendances optionnelles,
+son installateur et cette notice. Il ne contient aucune donnée personnelle.
+L’installateur ajoute huit lignes dans agentos/autonomous_runtime.py et copie
+agentos/file_assistant.py + requirements-documents.txt. Il conserve les autres
+changements présents et sauvegarde les fichiers remplacés sous backups.
+Il ne touche pas à memory.py, personal_manager.py, conversation.py ni à leurs bases.
+Si le point d’insertion a changé, il s’arrête avant toute modification.
+Aucun pip install automatique ; aucun changement envoyé à GitHub.
+
+PREMIER TEST — CRÉER
+Crée un fichier "courses.txt" contenant une liste de courses pour deux personnes.
+
+Paul donne un identifiant F-XXXXXXXXXX et traite le travail en arrière-plan.
+Le fichier se trouve dans workspace\courses.txt sur le PC qui exécute le serveur.
+Il annonce le résultat et le chemin via les notifications existantes.
+Tu peux aussi demander : fichiers resultat F-XXXXXXXXXX
+Si le fichier existe déjà, la tâche échoue sans le remplacer : choisis un autre nom.
+Un nom relatif est situé dans workspace ; un chemin extérieur demande un accord.
+
+DEUXIÈME TEST — ANALYSER
+Crée sur ton PC un dossier A_trier avec deux fichiers texte de test.
+Dans Paul, remplace le chemin ci-dessous par ton chemin réel :
+Analyse le dossier "C:\Users\romai\Documents\A_trier" pour extraire les dates et montants.
+
+Paul affiche le périmètre et demande : fichiers autoriser F-XXXXXXXXXX
+Envoie exactement cette commande. Un simple « oui » n’autorise rien.
+Tu peux refuser avec : fichiers refuser F-XXXXXXXXXX
+Chaque nouvelle analyse demande un nouvel accord, même pour le même dossier.
+L’accord est à usage unique et expire après 15 minutes ; redémarrer l’annule.
+Sans autorisation : pas de lecture ni de parcours de ce dossier par le module.
+L’accord précise la conservation locale des extraits et le serveur Ollama utilisé.
+Ce module vise le serveur local mono-utilisateur actuel ; les clients Web/CLI/
+Telegram déjà connectés représentent le même utilisateur.
+
+AJOUTER LE CLASSEMENT
+Analyse et trie les fichiers du dossier "C:\Users\romai\Documents\A_trier".
+
+Après l’analyse, une DEUXIÈME demande décrit chaque copie source → destination.
+Autorise ce nouveau F-XXXXXXXXXX pour effectuer les copies classées.
+Les originaux sont conservés. Aucun déplacement, suppression ou écrasement.
+Catégories de cette version : factures, administratif, technique, photos, notes, autres.
+Destination : workspace\documents_classes\tri-...\categorie\...
+Le préfixe numérique des copies évite les collisions entre fichiers homonymes.
+Une source modifiée depuis l’analyse est refusée : refaire l’analyse.
+Tu peux aussi proposer le tri plus tard : fichiers trier F-IDENTIFIANT_ANALYSE
+
+RÉUTILISER LES INFORMATIONS
+fichiers statut
+fichiers resultat F-IDENTIFIANT_ANALYSE
+fichiers extraits F-IDENTIFIANT_ANALYSE
+fichiers cherche facture EDF
+fichiers exporter F-IDENTIFIANT_ANALYSE
+Crée un fichier "synthese.md" à partir des informations de F-IDENTIFIANT_ANALYSE.
+
+Remplace les identifiants d’exemple par ceux donnés par Paul.
+L’index documentaire est data\document_index.sqlite3 (ou AGENTOS_DATA_DIR).
+Il conserve le chemin source, une empreinte SHA-256, la date d’analyse, l’extrait,
+le résumé IA, la catégorie et l’indication de lecture partielle.
+La recherche est lexicale, sur les 1000 derniers documents, et affiche au plus
+5 résultats. Les synthèses et interprétations visuelles IA restent à vérifier.
+Les exports JSON complets des extraits conservés vont dans workspace\documents_exports.
+La création à partir de F-... utilise au plus 10 documents par identifiant,
+avec 4000 caractères d’extrait + 2000 de résumé par document et 60000 au total.
+Ce stockage séparé est consultable après redémarrage et ne crée pas de souvenirs
+personnels : l’auteur d’une facture ou d’un texte n’est pas supposé être toi.
+Les contenus source ne sont jamais exécutés comme outils ou autorisations.
+
+FORMATS
+Création : TXT, MD, CSV, TSV, JSON, YAML/YML, HTML, CSS, JS, PY, XML, LOG, INI,
+CFG ; DOCX, XLSX et PDF simples avec les dépendances optionnelles.
+JSON et YAML sont validés avant écriture ; YAML nécessite PyYAML.
+DOCX/PDF : mise en page simple. Le PDF utilise une police latine ; les glyphes
+non compatibles provoquent une erreur, pas une substitution silencieuse.
+XLSX : tableau de valeurs textuelles, pas de formules ni de macros.
+Aucun programme généré n’est exécuté par ce module.
+Lecture : formats texte ci-dessus, DOCX (corps et tableaux), PDF avec texte,
+PNG/JPG/JPEG/WEBP avec modèle vision. Lecture XLSX/ancien DOC non incluse.
+Un PDF scanné sans texte n’est pas interprété automatiquement : exporter ses
+pages en images puis les analyser avec le modèle vision.
+
+IMAGES — CONFIGURATION
+Un modèle texte seul ne suffit pas pour examiner une image.
+Installe/choisis un modèle vision compatible Ollama. Dans le PowerShell qui
+lance api_server.py, avant le lancement, définis son nom EXACT :
+$env:AGENTOS_VISION_MODEL="NOM_DU_MODELE_VISION_INSTALLE"
+python .\api_server.py
+
+Le module ne télécharge aucun modèle automatiquement. S’il manque, l’image est
+signalée « non analysée » et les autres fichiers continuent à être traités.
+Le contenu est envoyé à OLLAMA_HOST déjà configuré dans Agent-OS ; si ce serveur
+est distant, les documents y sont transmis après ton accord affichant cet hôte.
+Référence technique : https://docs.ollama.com/capabilities/vision
+
+LIMITES ET CONTRÔLES
+- 100 fichiers maximum par analyse, 10 Mio par fichier, 5000 entrées parcourues.
+- Sans sous-dossiers par défaut ; ajoute « sous-dossiers » pour les inclure.
+- Les noms commençant par un point sont ignorés lors du parcours de dossier.
+- Liens symboliques, jonctions Windows et fichiers spéciaux refusés.
+- 24000 caractères conservés par fichier ; PDF limité à 30 pages et au plafond
+  de caractères. Une lecture tronquée est marquée partielle.
+- Un traitement documentaire à la fois ; la conversation reste disponible.
+- Les accès des anciens outils/agents ne deviennent pas un bac à sable système :
+  les demandes gérées par ce nouveau circuit sont celles soumises à son accord.
+- Ne modifie pas l’arborescence du dossier pendant une analyse/un classement.
+
+VALIDATION EFFECTUÉE
+19 tests ciblés avec modèle simulé : accès/refus/expiration/redémarrage, création
+sans écrasement, JSON invalide, PDF/DOCX/XLSX, recherche/export, limites,
+liens/fichiers spéciaux, réutilisation des sources et copies classées vérifiées.
+Test API réel /api/chat sur V6.3 avec Ollama simulé : création, approbation,
+analyse, proposition de classement, commande mémoire V2 et arrêt du serveur.
+Compatibilité vérifiée en appliquant les mises à jour mémoire V6.1 → V6.3.
+La qualité du modèle local, les images réelles et Windows restent à tester chez toi.

@@ -149,10 +149,6 @@ class AutonomousRuntime(CoreRuntime):
         # La récupération historique avait été différée pendant
         # CoreRuntime.__init__. Elle peut maintenant respecter priorités,
         # deadlines et hiérarchie dès le premier arbitrage.
-        # V6-FILES 1.1 — native Mission Control integration
-        from agentos.file_missions import install_file_missions
-        install_file_missions(self)
-
         self.recovery = super()._recover_active_work()
 
         self.autonomy.check_once()

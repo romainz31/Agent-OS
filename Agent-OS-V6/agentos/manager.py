@@ -14,6 +14,7 @@ from agentos.planner import Planner
 from agentos.project_files import ProjectFiles
 from agentos.python_runner import PythonRunner
 from agentos.router import Router
+from agentos.understanding import UnderstandingEngine
 from agentos.tasks import TaskManager
 from agentos.workers import (
     AIWorker,
@@ -253,6 +254,9 @@ class Manager:
         self.tasks = TaskManager()
         self.missions = MissionManager()
         self.router = Router()
+        self.understanding = UnderstandingEngine(
+            self.llm
+        )
 
         self.files = ProjectFiles(
             self.permissions
@@ -2604,6 +2608,9 @@ résultats terminés. Les étapes intermédiaires normales peuvent rester
 en arrière-plan.
 
 Réponds naturellement en français et utilise toujours le tutoiement.
+Quand un message contient à la fois un état personnel et une demande,
+réponds d'abord à la demande. L'état personnel sert à adapter la réponse,
+il ne doit jamais remplacer le but principal du message.
 Pour une question simple, réponds de façon courte et directe.
 N'ajoute pas de formule du type « n'hésite pas » ou de proposition générique
 à la fin si l'utilisateur ne l'a pas demandée.
@@ -2870,8 +2877,19 @@ MESSAGE :
             )
         )
 
-        emotional_signals = self.memory.maybe_remember(
+        understanding = self.understanding.analyze(
             value
+        )
+
+        # NATURAL MANAGER V6.2 — rend la compréhension du tour courant disponible à la
+        # surcouche conversationnelle PersonalManager.
+        self._current_understanding = understanding
+
+        emotional_signals = (
+            self.memory.maybe_remember_with_understanding(
+                value,
+                understanding,
+            )
         )
 
         if explicit_memory_fact is not None:
@@ -2930,15 +2948,53 @@ MESSAGE :
 
             return answer
 
-        # Router
+        # Router historique conservé comme filet de sécurité.
         route = self.router.route(
             value
         )
 
+        route_kind = route.kind
+        route_worker = route.worker
+        route_reason = route.reason
+
+        # V6.1 : quand UnderstandingEngine a réellement compris le
+        # message, sa décision sémantique prime sur les regex.
+        # Si Ollama/JSON échoue, routing_confident=False et l'ancien
+        # Router reprend automatiquement la main.
+        if understanding.routing_confident:
+            if understanding.work_requested:
+                route_kind = "task"
+                route_worker = (
+                    understanding.worker
+                    or route.worker
+                    or "ai_worker"
+                )
+                route_reason = (
+                    "compréhension V6.1 : "
+                    + (
+                        understanding.reason
+                        or "travail explicitement demandé"
+                    )
+                )
+            else:
+                route_kind = "conversation"
+                route_worker = None
+                route_reason = (
+                    "compréhension V6.1 : "
+                    + (
+                        understanding.reason
+                        or "échange conversationnel"
+                    )
+                )
+
         # Une simple mise à jour émotionnelle reçoit une réponse courte et
         # déterministe. Si le même message contient une vraie tâche, la tâche
         # garde la priorité et suit le workflow normal.
-        if route.kind == "conversation" and emotional_signals:
+        if (
+            route_kind == "conversation"
+            and emotional_signals
+            and understanding.pure_state_update
+        ):
             answer = self._emotional_acknowledgement(
                 emotional_signals
             )
@@ -2948,7 +3004,7 @@ MESSAGE :
             )
             return answer
 
-        if route.kind == "conversation":
+        if route_kind == "conversation":
             answer = self._conversation(
                 value
             )
@@ -2961,13 +3017,26 @@ MESSAGE :
             return answer
 
         # New mission
+        # V6.2 — le Planner reçoit l'objectif sémantique lorsqu'il existe.
+        # Cela transforme par exemple « tu peux apprendre YAML ? » en une
+        # vraie mission d'apprentissage actionnable, au lieu de lui faire
+        # planifier une simple réponse conversationnelle.
+        mission_message = value
+        if (
+            understanding.work_requested
+            and str(understanding.work_objective or "").strip()
+        ):
+            mission_message = str(
+                understanding.work_objective
+            ).strip()
+
         mission = self.orchestrator.create_mission(
-            message=value,
+            message=mission_message,
             initial_worker=(
-                route.worker
+                route_worker
                 or "ai_worker"
             ),
-            router_reason=route.reason,
+            router_reason=route_reason,
         )
 
         if mission is None:

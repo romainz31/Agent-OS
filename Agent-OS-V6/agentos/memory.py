@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agentos.config import DATA_DIR
 from agentos.storage import JsonStore
+from agentos.personal_memory_v2 import PersonalMemoryV2
 
 
 class Memory:
@@ -32,13 +33,13 @@ class Memory:
     SCHEMA_VERSION = "4.7.3"
 
     SESSION_LIMIT = 60
-    LONG_TERM_LIMIT = 250
+    LONG_TERM_LIMIT = 2000
     PROFILE_LIMIT = 100
-    EPISODIC_LIMIT = 200
+    EPISODIC_LIMIT = 5000
     OPERATIONAL_LIMIT = 300
     WORKING_LIMIT = 100
     EMOTIONAL_HISTORY_LIMIT = 120
-    RELATIONAL_LIMIT = 120
+    RELATIONAL_LIMIT = 500
     RELATIONAL_HISTORY_LIMIT = 300
     RELATIONAL_REINFORCEMENT_COOLDOWN_SECONDS = 60
 
@@ -215,6 +216,31 @@ class Memory:
         self._prune_stale_emotional_current()
         self._save()
 
+        # V6.3 : SQLite devient la source principale pour les événements
+        # personnels. Le JSON historique reste en dual-write pour compatibilité
+        # pendant la période de validation.
+        self.personal_v2 = None
+        try:
+            self.personal_v2 = PersonalMemoryV2(
+                DATA_DIR / "personal_memory.db",
+                known_people_provider=self._personal_v2_known_people,
+            )
+            migration = self.personal_v2.migrate_legacy(
+                self.data.get("episodic", [])
+            )
+            self.data.setdefault("meta", {})["personal_memory_v2"] = {
+                "schema_version": 2,
+                "migration_seen": migration.get("seen", 0),
+                "migration_imported": migration.get("imported", 0),
+                "updated_at": self._now(),
+            }
+            self.data.get("meta", {}).pop("personal_memory_v2_error", None)
+            self._save()
+        except Exception as exc:
+            self.personal_v2 = None
+            self.data.setdefault("meta", {})["personal_memory_v2_error"] = str(exc)
+            self._save()
+
     # =========================================================
     # BASIC HELPERS
     # =========================================================
@@ -283,17 +309,297 @@ class Memory:
 
     @classmethod
     def _has_temporal_marker(cls, text: str) -> bool:
-        """Détecte les marqueurs temporels comme des mots/expressions entiers.
-
-        Évite notamment le faux positif historique : ``hier`` dans ``fichier``.
-        """
+        """Détecte les marqueurs temporels comme des mots/expressions entiers."""
         normalized = cls._ascii(cls._clean_text(text))
         for marker in cls.TEMPORAL_MARKERS:
             wanted = cls._ascii(marker)
             pattern = r"(?<![a-z0-9_])" + re.escape(wanted) + r"(?![a-z0-9_])"
             if re.search(pattern, normalized, flags=re.IGNORECASE):
                 return True
+
+        # V6.2.3 : couvre les formulations naturelles absentes de la liste
+        # historique : "dimanche dernier", "mardi", "il y a 3 jours", etc.
+        natural = re.sub(r"[^a-z0-9]+", " ", normalized)
+        natural = " ".join(natural.split())
+        if re.search(
+            r"\b(?:aujourd\s+hui|avant\s+hier|ce\s+matin|ce\s+soir|cette\s+nuit|la\s+semaine\s+derniere|le\s+mois\s+dernier|ce\s+week(?:end|-end)|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?:\s+dernier(?:e)?)?\b",
+            natural,
+        ):
+            return True
+        if re.search(
+            r"\bil y a\s+(?:\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze)\s+(?:jour|jours|semaine|semaines|mois|an|ans)\b",
+            natural,
+        ):
+            return True
         return False
+
+
+    # =========================================================
+    # EVENT TIMELINE V6.2.3
+    # =========================================================
+
+    @classmethod
+    def _event_date_from_text(
+        cls,
+        text: str,
+        *,
+        reference_at: Any = None,
+    ) -> str | None:
+        """Résout une date d'événement quand le texte la rend explicite.
+
+        La résolution se fait relativement au moment où le souvenir a été
+        raconté. C'est essentiel pour les anciens épisodes : un ancien "hier"
+        ne doit pas être recalculé par rapport à la date du prochain redémarrage.
+        """
+        normalized = cls._ascii(cls._clean_text(text))
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        normalized = " ".join(normalized.split())
+        if not normalized:
+            return None
+
+        reference = cls._parse_time(reference_at) if reference_at else None
+        if reference is None:
+            reference = datetime.now().astimezone()
+        else:
+            try:
+                reference = reference.astimezone()
+            except Exception:
+                pass
+
+        base = reference.replace(
+            hour=12,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        # Expressions les plus précises d'abord.
+        if re.search(r"\bavant hier\b", normalized):
+            return (base - timedelta(days=2)).date().isoformat()
+
+        if re.search(r"(?<!avant )\bhier\b", normalized):
+            return (base - timedelta(days=1)).date().isoformat()
+
+        if any(
+            marker in normalized
+            for marker in (
+                "aujourd hui",
+                "ce matin",
+                "cet apres midi",
+                "ce soir",
+                "cette nuit",
+            )
+        ):
+            return base.date().isoformat()
+
+        if re.search(r"\bdemain\b", normalized):
+            return (base + timedelta(days=1)).date().isoformat()
+
+        number_words = {
+            "un": 1,
+            "une": 1,
+            "deux": 2,
+            "trois": 3,
+            "quatre": 4,
+            "cinq": 5,
+            "six": 6,
+            "sept": 7,
+            "huit": 8,
+            "neuf": 9,
+            "dix": 10,
+            "onze": 11,
+            "douze": 12,
+            "treize": 13,
+            "quatorze": 14,
+            "quinze": 15,
+        }
+        ago = re.search(
+            r"\bil y a\s+(\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze)\s+jours?\b",
+            normalized,
+        )
+        if ago:
+            raw = ago.group(1)
+            days = int(raw) if raw.isdigit() else number_words.get(raw)
+            if days is not None:
+                return (base - timedelta(days=days)).date().isoformat()
+
+        weekdays = {
+            "lundi": 0,
+            "mardi": 1,
+            "mercredi": 2,
+            "jeudi": 3,
+            "vendredi": 4,
+            "samedi": 5,
+            "dimanche": 6,
+        }
+        weekday_match = re.search(
+            r"\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+dernier(?:e)?\b",
+            normalized,
+        )
+        if weekday_match:
+            target_weekday = weekdays[weekday_match.group(1)]
+            delta = (base.weekday() - target_weekday) % 7
+            if delta == 0:
+                delta = 7
+            return (base - timedelta(days=delta)).date().isoformat()
+
+        return None
+
+    def _attach_event_date(
+        self,
+        text: str,
+    ) -> None:
+        event_date = self._event_date_from_text(
+            text,
+            reference_at=self._now(),
+        )
+        if not event_date:
+            return
+
+        wanted = self._key(text)
+        for item in reversed(self.data.get("episodic", [])[-60:]):
+            if not isinstance(item, dict):
+                continue
+            if self._key(item.get("content", "")) != wanted:
+                continue
+            if item.get("event_date") != event_date:
+                item["event_date"] = event_date
+                self._save()
+            return
+
+    def _resolved_event_date(
+        self,
+        item: dict[str, Any],
+    ) -> str | None:
+        current = self._clean_text(
+            item.get("event_date", "")
+        )
+        if current:
+            return current
+
+        content = self._clean_text(
+            item.get("content", "")
+        )
+        if not content:
+            return None
+
+        resolved = self._event_date_from_text(
+            content,
+            reference_at=item.get("created_at"),
+        )
+        if resolved:
+            item["event_date"] = resolved
+            self._save()
+        return resolved
+
+    def latest_episodic_match(
+        self,
+        query: str,
+    ) -> dict[str, Any] | None:
+        """Retourne le dernier événement vécu correspondant à la requête.
+
+        On compare la date de l'événement, pas la date à laquelle le souvenir
+        a été raconté. Les anciens épisodes sans ``event_date`` sont résolus à
+        la volée à partir de leur texte et de leur ``created_at``.
+        """
+        # V6.3 : la base structurée SQLite est consultée en premier.
+        store = getattr(self, "personal_v2", None)
+        if store is not None:
+            try:
+                result = store.latest_match(query)
+            except Exception:
+                result = None
+            if isinstance(result, dict) and result:
+                # Compatibilité avec le format historique attendu par Paul.
+                return {
+                    "content": result.get("content", ""),
+                    "kind": result.get("kind", "user_event"),
+                    "source": result.get("source", "user"),
+                    "confidence": result.get("confidence", 0.9),
+                    "event_date": result.get("event_start"),
+                    "event_end": result.get("event_end"),
+                    "people": result.get("people", []),
+                    "places": result.get("places", []),
+                    "transport": result.get("transport"),
+                    "transport_inferred": result.get("transport_inferred", False),
+                    "created_at": result.get("recorded_at", ""),
+                }
+
+        ignored = {
+            "quand", "derniere", "dernier", "fois", "pour", "la", "le",
+            "les", "est", "ce", "que", "jai", "j", "ai", "je", "tu",
+            "me", "moi", "souviens", "rappelle", "date", "moment",
+        }
+        query_tokens = {
+            token
+            for token in self._expanded_tokens(query)
+            if token not in ignored
+        }
+        if not query_tokens:
+            query_tokens = self._expanded_tokens(query)
+        if not query_tokens:
+            return None
+
+        candidates: list[tuple[int, int, float, int, dict[str, Any]]] = []
+
+        for index, item in enumerate(self.data.get("episodic", [])):
+            if not isinstance(item, dict):
+                continue
+            content = self._clean_text(item.get("content", ""))
+            if not content:
+                continue
+
+            content_tokens = self._expanded_tokens(content)
+            overlap = len(query_tokens & content_tokens)
+            if overlap <= 0:
+                continue
+
+            event_date = self._resolved_event_date(item)
+            event_rank = 0
+            has_event_date = 0
+            if event_date:
+                try:
+                    event_rank = int(event_date.replace("-", ""))
+                    has_event_date = 1
+                except ValueError:
+                    event_rank = 0
+
+            created = self._parse_time(item.get("created_at", ""))
+            created_rank = created.timestamp() if created is not None else 0.0
+
+            candidates.append(
+                (
+                    overlap,
+                    has_event_date,
+                    float(event_rank),
+                    index,
+                    {
+                        **dict(item),
+                        "event_date": event_date,
+                        "created_rank": created_rank,
+                    },
+                )
+            )
+
+        if not candidates:
+            return None
+
+        # D'abord la meilleure correspondance sémantique. Parmi les souvenirs
+        # aussi pertinents, le plus récent dans la chronologie vécue gagne.
+        best_overlap = max(row[0] for row in candidates)
+        relevant = [row for row in candidates if row[0] == best_overlap]
+        relevant.sort(
+            key=lambda row: (
+                row[1],
+                row[2],
+                row[4].get("created_rank", 0.0),
+                row[3],
+            ),
+            reverse=True,
+        )
+        result = dict(relevant[0][4])
+        result.pop("created_rank", None)
+        return result
 
     @staticmethod
     def _parse_time(value: Any) -> datetime | None:
@@ -1942,6 +2248,20 @@ class Memory:
         # même oubli. Elles ne sont jamais affichées à l'utilisateur.
         result["forgotten_values"] = sorted(forgotten_values)
 
+        # V6.3 : un oubli explicite s'applique aussi à la base SQLite.
+        if persist:
+            store = getattr(self, "personal_v2", None)
+            if store is not None:
+                try:
+                    removed_v2 = int(store.forget(clean))
+                except Exception:
+                    removed_v2 = 0
+                if removed_v2 > 0:
+                    result["count"] += removed_v2
+                    if "personal_v2" not in result["categories"]:
+                        result["categories"].append("personal_v2")
+                    changed = True
+
         if changed and persist:
             self._save()
 
@@ -2201,6 +2521,22 @@ class Memory:
             confidence=confidence,
             limit=self.EPISODIC_LIMIT,
         )
+        # V6.2.3 : mémorise aussi quand l'événement s'est réellement produit.
+        self._attach_event_date(text)
+
+        # V6.3 : dual-write vers la mémoire événementielle SQLite.
+        store = getattr(self, "personal_v2", None)
+        if store is not None:
+            try:
+                store.remember_event(
+                    text,
+                    kind=kind,
+                    source=source,
+                    confidence=confidence,
+                    recorded_at=self._now(),
+                )
+            except Exception:
+                pass
 
     def remember_operational(
         self,
@@ -2575,6 +2911,343 @@ class Memory:
         if not emotional:
             self._extract_episode(text)
         return emotional
+
+
+    def maybe_remember_with_understanding(
+        self,
+        text: str,
+        understanding: Any,
+    ) -> dict[str, dict[str, Any]]:
+        # V6.1 — ingestion mémoire guidée par UnderstandingEngine.
+        self._last_memory_action = None
+
+        forget_target = self.explicit_forget_fact(text)
+        if forget_target is not None:
+            self.forget_personal(
+                forget_target,
+                source="user_explicit",
+                persist=True,
+                track_action=True,
+            )
+            return {}
+
+        operational = self._looks_operational_text(text)
+        explicit = self._explicit_memory(text)
+
+        if explicit or operational:
+            return {}
+
+        # Les couches déjà fiables de V4.7 restent actives.
+        self._extract_profile(text)
+        self._extract_relational(
+            text,
+            source="automatic",
+            persist=True,
+            track_action=True,
+        )
+
+        # D'abord l'extracteur émotionnel historique.
+        emotional = self.observe_emotional_state(text)
+
+        # Une phrase mixte terminée par "?" était historiquement considérée
+        # comme une question entière et faisait perdre "je suis fatigué".
+        # UnderstandingEngine peut compléter cet état sans court-circuiter
+        # la demande conversationnelle.
+        if not emotional:
+            state = getattr(
+                understanding,
+                "user_state",
+                {},
+            )
+            if isinstance(state, dict):
+                allowed = {
+                    "energy": {"low", "high"},
+                    "motivation": {"low", "high"},
+                    "stress": {"low", "moderate", "high"},
+                    "mood": {"positive", "negative"},
+                }
+
+                signals: dict[str, dict[str, Any]] = {}
+
+                for dimension, values in allowed.items():
+                    raw_value = self._clean_text(
+                        state.get(dimension, "")
+                    ).lower()
+                    if raw_value not in values:
+                        continue
+
+                    signals[dimension] = {
+                        "value": raw_value,
+                        "confidence": 0.82,
+                    }
+
+                if signals:
+                    now = self._now()
+                    source_text = self._clean_text(text)
+                    current = self.data[
+                        "emotional"
+                    ].setdefault(
+                        "current",
+                        {},
+                    )
+
+                    for dimension, signal in signals.items():
+                        current[dimension] = {
+                            "value": signal["value"],
+                            "confidence": signal["confidence"],
+                            "observed_at": now,
+                            "source": source_text,
+                        }
+
+                    self.data[
+                        "emotional"
+                    ].setdefault(
+                        "history",
+                        [],
+                    ).append(
+                        {
+                            "at": now,
+                            "source": source_text,
+                            "signals": signals,
+                        }
+                    )
+                    self.data["emotional"]["history"] = (
+                        self.data["emotional"]["history"][
+                            -self.EMOTIONAL_HISTORY_LIMIT:
+                        ]
+                    )
+                    self._save()
+                    emotional = signals
+
+        raw_items = getattr(
+            understanding,
+            "memory_items",
+            [],
+        )
+        memory_items = (
+            raw_items
+            if isinstance(raw_items, list)
+            else []
+        )
+
+        ingested = 0
+
+        for raw in memory_items[:12]:
+            if isinstance(raw, dict):
+                kind = self._clean_text(
+                    raw.get(
+                        "kind",
+                        raw.get("type", ""),
+                    )
+                ).lower()
+                content = self._clean_text(
+                    raw.get("content", "")
+                )
+                confidence = self._clamp(
+                    raw.get("confidence", 0.8)
+                )
+            else:
+                kind = self._clean_text(
+                    getattr(raw, "kind", "")
+                ).lower()
+                content = self._clean_text(
+                    getattr(raw, "content", "")
+                )
+                confidence = self._clamp(
+                    getattr(raw, "confidence", 0.8)
+                )
+
+            if (
+                not content
+                or confidence < 0.45
+                or self._looks_like_question(content)
+                or self._looks_task_request_text(content)
+                or self._looks_operational_text(content)
+            ):
+                continue
+
+            if kind == "episode":
+                self.remember_episode(
+                    content,
+                    kind="user_event",
+                    source="understanding",
+                    confidence=confidence,
+                )
+                ingested += 1
+                continue
+
+            if kind == "fact":
+                self.remember(
+                    content,
+                    kind="fact",
+                    source="understanding",
+                    confidence=confidence,
+                )
+                ingested += 1
+                continue
+
+            if kind == "profile":
+                before = len(
+                    self.data.get(
+                        "profile",
+                        [],
+                    )
+                )
+                self._extract_profile(
+                    content
+                )
+                after = len(
+                    self.data.get(
+                        "profile",
+                        [],
+                    )
+                )
+                if after == before:
+                    self.remember(
+                        content,
+                        kind="profile_fact",
+                        source="understanding",
+                        confidence=confidence,
+                    )
+                ingested += 1
+                continue
+
+            if kind in {
+                "preference",
+                "habit",
+                "relation",
+            }:
+                structured = self._extract_relational(
+                    content,
+                    source="understanding",
+                    confidence_boost=0.03,
+                    persist=True,
+                    track_action=False,
+                )
+                if structured == 0:
+                    self.remember(
+                        content,
+                        kind=kind,
+                        source="understanding",
+                        confidence=confidence,
+                    )
+                ingested += 1
+                continue
+
+        # Filet de sécurité historique si aucun élément structuré n'a été
+        # produit. Une question entière ne devient jamais un épisode.
+        if (
+            ingested == 0
+            and not emotional
+            and not self._looks_like_question(text)
+        ):
+            self._extract_episode(
+                text
+            )
+
+        return emotional
+
+
+    # =========================================================
+    # PERSONAL MEMORY V2 / SQLITE V6.3
+    # =========================================================
+
+    def _personal_v2_known_people(self) -> list[str]:
+        result: list[str] = []
+        try:
+            items = self.relational_active_items("relations")
+        except Exception:
+            items = []
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            value = self._clean_text(item.get("value", ""))
+            if value and value not in result:
+                result.append(value)
+        return result
+
+    def personal_memory_v2_observe(
+        self,
+        text: str,
+    ) -> dict[str, Any] | None:
+        store = getattr(self, "personal_v2", None)
+        if store is None:
+            return None
+        try:
+            if not store.looks_personal_statement(text):
+                return None
+            return store.remember_event(
+                text,
+                kind="user_event",
+                source="user",
+                confidence=0.92,
+                recorded_at=self._now(),
+            )
+        except Exception:
+            return None
+
+    def personal_memory_v2_should_own(
+        self,
+        query: str,
+    ) -> bool:
+        store = getattr(self, "personal_v2", None)
+        if store is None:
+            return False
+        try:
+            return bool(store.looks_personal_query(query))
+        except Exception:
+            return False
+
+    def personal_memory_v2_context(
+        self,
+        query: str,
+        *,
+        limit: int = 8,
+    ) -> str:
+        store = getattr(self, "personal_v2", None)
+        if store is None:
+            return "(mémoire personnelle V2 indisponible)"
+        try:
+            return store.context(query, limit=limit)
+        except Exception as exc:
+            return f"(mémoire personnelle V2 indisponible : {exc})"
+
+    def personal_memory_v2_direct_answer(
+        self,
+        query: str,
+        *,
+        force: bool = False,
+    ) -> str | None:
+        store = getattr(self, "personal_v2", None)
+        if store is None:
+            return None
+        try:
+            if not force and not store.looks_personal_query(query):
+                return None
+            # direct_answer vérifie lui-même les questions privées. En mode
+            # force (relance pronominale), on utilise une copie enrichie par le
+            # fil utilisateur qui contient normalement un ancrage personnel.
+            return store.direct_answer(query)
+        except Exception:
+            return None
+
+    def personal_memory_v2_status(self) -> str:
+        store = getattr(self, "personal_v2", None)
+        if store is None:
+            error = self.data.get("meta", {}).get(
+                "personal_memory_v2_error"
+            )
+            if error:
+                return (
+                    "MÉMOIRE PERSONNELLE V2 indisponible.\n"
+                    f"Erreur : {error}"
+                )
+            return "MÉMOIRE PERSONNELLE V2 indisponible."
+        try:
+            return store.status_summary()
+        except Exception as exc:
+            return f"MÉMOIRE PERSONNELLE V2 indisponible : {exc}"
 
     # =========================================================
     # SELECTIVE RETRIEVAL
