@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    <meta
+        name="theme-color"
+        content="#0b0f17"
+    >
+    <title>Agent-OS Control Center</title>
+    <link
+        rel="stylesheet"
+        href="/static/styles.css"
+    >
+</head>
+
+<body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <div
+        id="networkBanner"
+        class="network-banner hidden"
+    >
+        Connexion au backend interrompue.
+    </div>
+
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark">
+                AO
+            </div>
+
+            <div>
+                <div class="brand-name">
+                    Agent-OS
+                </div>
+
+                <div class="brand-subtitle">
+                    Control Center
+                </div>
+            </div>
+        </div>
+
+        <div class="topbar-center">
+            <div
+                id="serverState"
+                class="server-state"
+            >
+                <span class="status-dot"></span>
+                Connexion…
+            </div>
+        </div>
+
+        <div class="topbar-actions">
+            <span
+                id="versionBadge"
+                class="version-badge"
+            >
+                V7.0.1
+            </span>
+
+            <a
+                class="ghost-link"
+                href="/docs"
+                target="_blank"
+                rel="noreferrer"
+            >
+                API Docs
+            </a>
+        </div>
+    </header>
+
+    <main class="shell">
+        <section class="stats-grid">
+            <article class="stat-card">
+                <div class="stat-label">
+                    Missions actives
+                </div>
+
+                <div
+                    id="statActiveMissions"
+                    class="stat-value"
+                >
+                    —
+                </div>
+
+                <div class="stat-foot">
+                    en cours ou en attente
+                </div>
+            </article>
+
+            <article class="stat-card">
+                <div class="stat-label">
+                    Workers occupés
+                </div>
+
+                <div
+                    id="statBusyAgents"
+                    class="stat-value"
+                >
+                    —
+                </div>
+
+                <div class="stat-foot">
+                    tâches en exécution
+                </div>
+            </article>
+
+            <article class="stat-card">
+                <div class="stat-label">
+                    Approbations
+                </div>
+
+                <div
+                    id="statApprovals"
+                    class="stat-value"
+                >
+                    —
+                </div>
+
+                <div class="stat-foot">
+                    décisions requises
+                </div>
+            </article>
+
+            <article class="stat-card">
+                <div class="stat-label">
+                    Missions totales
+                </div>
+
+                <div
+                    id="statTotalMissions"
+                    class="stat-value"
+                >
+                    —
+                </div>
+
+                <div class="stat-foot">
+                    historique persistant
+                </div>
+            </article>
+        </section>
+
+        <section class="dashboard-v1">
+            <div class="left-column-v1">
+                <article class="panel approvals-panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="eyebrow">
+                            HUMAN-IN-THE-LOOP
+                        </div>
+
+                        <h2>
+                            Approbations
+                        </h2>
+                    </div>
+
+                    <div
+                        id="approvalCountBadge"
+                        class="count-badge"
+                    >
+                        0
+                    </div>
+                </div>
+
+                <div
+                    id="approvalList"
+                    class="approval-list"
+                >
+                    <div class="empty-state">
+                        Aucune approbation en attente.
+                    </div>
+                </div>
+            </article>
+
+                <article class="panel team-panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="eyebrow">
+                            ÉQUIPE
+                        </div>
+
+                        <h2>
+                            Agents
+                        </h2>
+                    </div>
+                </div>
+
+                <div
+                    id="agentGrid"
+                    class="agent-grid"
+                >
+                    <div class="empty-state">
+                        Chargement…
+                    </div>
+                </div>
+            </article>
+            </div>
+
+            <article class="panel chat-panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="eyebrow">
+                            MANAGER
+                        </div>
+
+                        <h1>
+                            Conversation
+                        </h1>
+                    </div>
+
+                    <button
+                        id="clearChatButton"
+                        class="icon-button"
+                        type="button"
+                        title="Effacer uniquement l'affichage local du chat"
+                    >
+                        Effacer
+                    </button>
+                </div>
+
+                <div
+                    id="chatMessages"
+                    class="chat-messages"
+                ></div>
+
+                <form
+                    id="chatForm"
+                    class="chat-composer"
+                >
+                    <textarea
+                        id="chatInput"
+                        rows="1"
+                        maxlength="20000"
+                        placeholder="Parle au Manager ou confie-lui une mission…"
+                        autocomplete="off"
+                    ></textarea>
+
+                    <button
+                        id="sendButton"
+                        class="primary-button send-button"
+                        type="submit"
+                    >
+                        Envoyer
+                    </button>
+                </form>
+
+                <div class="composer-hint">
+                    Entrée pour envoyer · Maj + Entrée pour une nouvelle ligne
+                </div>
+            </article>
+
+            <article class="panel mission-panel">
+                <div class="panel-header mission-header">
+                    <div>
+                        <div class="eyebrow">
+                            MISSION CONTROL
+                        </div>
+
+                        <h2>
+                            Missions
+                        </h2>
+                    </div>
+
+                    <button
+                        id="refreshButton"
+                        class="icon-button"
+                        type="button"
+                    >
+                        Actualiser
+                    </button>
+                </div>
+
+                <div
+                    id="missionFilters"
+                    class="filter-row"
+                >
+                    <button
+                        class="filter-chip active"
+                        type="button"
+                        data-filter="all"
+                    >
+                        Toutes
+                    </button>
+
+                    <button
+                        class="filter-chip"
+                        type="button"
+                        data-filter="active"
+                    >
+                        Actives
+                    </button>
+
+                    <button
+                        class="filter-chip"
+                        type="button"
+                        data-filter="waiting_approval"
+                    >
+                        Approbation
+                    </button>
+
+                    <button
+                        class="filter-chip"
+                        type="button"
+                        data-filter="completed"
+                    >
+                        Terminées
+                    </button>
+
+                    <button
+                        class="filter-chip"
+                        type="button"
+                        data-filter="failed"
+                    >
+                        Problèmes
+                    </button>
+                </div>
+
+                <div
+                    id="missionList"
+                    class="mission-list"
+                >
+                    <div class="empty-state">
+                        Chargement des missions…
+                    </div>
+                </div>
+            </article>
+        </section>
+    </main>
+
+    <aside
+        id="missionDrawer"
+        class="drawer"
+        aria-hidden="true"
+    >
+        <button
+            id="drawerBackdrop"
+            class="drawer-backdrop"
+            type="button"
+            aria-label="Fermer"
+        ></button>
+
+        <div class="drawer-panel">
+            <div class="drawer-header">
+                <div>
+                    <div
+                        id="drawerMissionId"
+                        class="eyebrow"
+                    >
+                        MISSION
+                    </div>
+
+                    <h2
+                        id="drawerTitle"
+                    >
+                        Détail
+                    </h2>
+                </div>
+
+                <button
+                    id="drawerClose"
+                    class="icon-button"
+                    type="button"
+                >
+                    Fermer
+                </button>
+            </div>
+
+            <div
+                id="drawerContent"
+                class="drawer-content"
+            ></div>
+        </div>
+    </aside>
+
+    <div
+        id="toastStack"
+        class="toast-stack"
+    ></div>
+
+    <script
+        src="/static/app.js"
+        defer
+    ></script>
+<script src="/static/life.js"></script>
+</body>
+</html>

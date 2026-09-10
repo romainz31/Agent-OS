@@ -1,0 +1,29 @@
+{
+  "name": "Agent-OS",
+  "version": "10.1.0",
+  "built_at": "2026-09-10",
+  "base": {
+    "repository": "https://github.com/romainz31/Agent-OS",
+    "commit": "2895c9670f29b1403d37fdb6a16b41baf093c4aa",
+    "label": "V6.6.3.4"
+  },
+  "inspiration": {
+    "repository": "https://github.com/agent0ai/agent-zero",
+    "commit_reviewed": "b1cbd1f960a1a5c4482b324dcff4742aa67b7a51",
+    "license": "MIT"
+  },
+  "validation": {
+    "status": "passed",
+    "suite_count": 14,
+    "new_unit_tests": 15,
+    "api_integration": "passed",
+    "live_ollama": "not_run",
+    "live_telegram": "not_run",
+    "windows": "not_run",
+    "python": "3.12"
+  },
+  "source_archives": [
+    "Agent-OS-V7.0.0.zip",
+    "Agent-OS-V7.0.1-PATCH.zip"
+  ]
+}
