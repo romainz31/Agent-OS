@@ -17,6 +17,7 @@ ALLOWED_PRIMARY_INTENTS = {
     "memory_query",
     "memory_control",
     "operational",
+    "agenda",
 }
 
 ALLOWED_CONVERSATION_GOALS = {
@@ -58,6 +59,30 @@ ALLOWED_VERBOSITY = {
 }
 
 
+ALLOWED_AGENDA_ACTIONS = {
+    "add",
+    "query",
+    "complete",
+    "none",
+}
+
+ALLOWED_AGENDA_VIEWS = {
+    "todo",
+    "appointment",
+    "event",
+    "program",
+    "none",
+}
+
+ALLOWED_AGENDA_FIELDS = {
+    "what",
+    "where",
+    "when",
+    "who",
+    "none",
+}
+
+
 @dataclass(frozen=True)
 class MemoryItem:
     kind: str
@@ -83,6 +108,16 @@ class Understanding:
     learning_requested: bool = False
     learning_subject: str = ""
     learning_confidence: float = 0.0
+
+
+    agenda_requested: bool = False
+    agenda_action: str = "none"
+    agenda_view: str = "none"
+    agenda_target: str = ""
+    agenda_time: str = ""
+    agenda_subject: str = ""
+    agenda_field: str = "none"
+    agenda_confidence: float = 0.0
 
     memory_items: list[MemoryItem] = field(default_factory=list)
     user_state: dict[str, Any] = field(default_factory=dict)
@@ -189,6 +224,58 @@ Exemples :
 Pour memory_query : work.requested=false. Le Manager doit interroger sa mémoire
 personnelle et ne jamais chercher une personne privée sur Internet par défaut.
 
+
+RÈGLE 5C — AGENDA PERSONNEL / TODO / RENDEZ-VOUS
+Reconnais sémantiquement ce qui concerne le planning personnel de l'utilisateur,
+même si sa phrase ne correspond à aucun mot-clé exact.
+
+L'agenda contient trois choses différentes :
+- todo = tâche personnelle à accomplir ;
+- appointment = rendez-vous ;
+- event = événement personnel notable planifié ;
+- program = vue combinée de tout ce qui est prévu.
+
+Exemples :
+- "samedi je dois aller chercher Coralie à l'aéroport"
+  => agenda.requested=true, action="add", view="todo", target="samedi",
+     subject="aller chercher Coralie à l'aéroport" ;
+- "je dois faire quoi samedi ?"
+  => agenda.requested=true, action="query", view="todo", target="samedi",
+     field="what" ;
+- "quelles sont mes tâches samedi ?"
+  => agenda query/todo/samedi ;
+- "où je dois aller samedi ?"
+  => agenda query/program/samedi, field="where" ;
+- "à quelle heure est mon rendez-vous demain ?"
+  => agenda query/appointment/demain, field="when" ;
+- "les événements prévus pour samedi ?" APRÈS une discussion sur son agenda
+  => agenda query/event/samedi ;
+- "mon programme samedi ?"
+  => agenda query/program/samedi ;
+- "j'ai fini la manucure"
+  => agenda complete/todo, subject="manucure".
+
+Utilise le message précédent et le sujet précédent pour comprendre les relances.
+Si l'utilisateur vient de parler de son agenda, une phrase courte comme
+"et samedi ?" ou "les événements prévus samedi ?" continue naturellement ce
+contexte sauf indication contraire.
+
+IMPORTANT : ne confonds pas agenda personnel et recherche publique.
+- "je dois faire quoi samedi ?" = consulter SES tâches, pas proposer des sorties ;
+- "quels événements sont prévus samedi à Toulouse ?" = question externe/publique,
+  agenda.requested=false ;
+- "que faire à Paris samedi ?" = recommandations externes,
+  agenda.requested=false.
+
+Pour une entrée d'agenda, ne crée pas une mission Agent-OS.
+work.requested=false.
+Une TODO ou un rendez-vous n'est pas un souvenir épisodique déjà vécu : ne le
+mets pas dans memory_items. L'agenda possède son propre stockage.
+Dans agenda.target, conserve une expression temporelle normalisée mais naturelle
+("aujourd'hui", "demain", "samedi", "dans 3 jours", "20 septembre").
+Corrige une petite faute évidente si nécessaire, par exemple "samdi" => "samedi".
+agenda.subject contient seulement le sujet utile, sans recopier toute la phrase.
+
 Les instructions durables sur la façon de répondre sont des préférences :
 - "sois moins enjoué avec moi" -> preference ;
 - "réponds-moi directement" -> preference ;
@@ -229,6 +316,16 @@ Format exact :
     "requested": false,
     "subject": "",
     "goal": "",
+    "confidence": 0.0
+  },
+  "agenda": {
+    "requested": false,
+    "action": "add|query|complete|none",
+    "view": "todo|appointment|event|program|none",
+    "target": "",
+    "time": "",
+    "subject": "",
+    "field": "what|where|when|who|none",
     "confidence": 0.0
   },
   "memory_items": [
@@ -437,6 +534,33 @@ une autre demande, mets false.
         learning_goal = cls._clean(learning.get("goal", ""))
         learning_confidence = cls._clamp(learning.get("confidence", 0.0))
 
+
+        agenda = payload.get("agenda", {})
+        if not isinstance(agenda, dict):
+            agenda = {}
+
+        agenda_requested = bool(agenda.get("requested", False))
+        agenda_action = cls._clean(agenda.get("action", "none")).lower()
+        agenda_view = cls._clean(agenda.get("view", "none")).lower()
+        agenda_target = cls._clean(agenda.get("target", ""))[:120]
+        agenda_time = cls._clean(agenda.get("time", ""))[:40]
+        agenda_subject = cls._clean(agenda.get("subject", ""))[:240]
+        agenda_field = cls._clean(agenda.get("field", "none")).lower()
+        agenda_confidence = cls._clamp(agenda.get("confidence", 0.0))
+
+        if agenda_action not in ALLOWED_AGENDA_ACTIONS:
+            agenda_action = "none"
+        if agenda_view not in ALLOWED_AGENDA_VIEWS:
+            agenda_view = "none"
+        if agenda_field not in ALLOWED_AGENDA_FIELDS:
+            agenda_field = "none"
+
+        if agenda_confidence < 0.50:
+            agenda_requested = False
+            agenda_action = "none"
+            agenda_view = "none"
+            agenda_field = "none"
+
         if learning_requested:
             requested = True
             explicit = True
@@ -452,7 +576,18 @@ une autre demande, mets false.
                     "rendre réutilisable par les workers d'Agent-OS."
                 )
 
+        # SEMANTIC AGENDA V6.4.2 — l'agenda est une intention personnelle
+        # distincte du travail Agent-OS et de la recherche Web.
+        if agenda_requested:
+            requested = False
+            explicit = False
+            objective = ""
+            worker = None
+            primary = "agenda"
+
         confidence = cls._clamp(payload.get("confidence", work_confidence))
+        if agenda_requested:
+            confidence = max(confidence, agenda_confidence)
         if learning_requested:
             confidence = max(confidence, learning_confidence)
 
@@ -490,7 +625,7 @@ une autre demande, mets false.
         )
 
         pure_state_update = bool(payload.get("pure_state_update", False))
-        if requested or goal in {
+        if requested or agenda_requested or goal in {
             "entertainment",
             "advice",
             "explanation",
@@ -512,6 +647,14 @@ une autre demande, mets false.
             learning_requested=learning_requested,
             learning_subject=learning_subject,
             learning_confidence=learning_confidence,
+            agenda_requested=agenda_requested,
+            agenda_action=agenda_action,
+            agenda_view=agenda_view,
+            agenda_target=agenda_target,
+            agenda_time=agenda_time,
+            agenda_subject=agenda_subject,
+            agenda_field=agenda_field,
+            agenda_confidence=agenda_confidence,
             memory_items=cls._normalize_memory_items(payload.get("memory_items", [])),
             user_state=cleaned_state,
             response_style=response_style,

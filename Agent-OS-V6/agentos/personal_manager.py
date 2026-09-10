@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from agentos.agenda import PersonalAgenda
+from agentos.decision import ActionDecisionEngine
 from agentos.config import DATA_DIR
 
 from agentos.conversation import ConversationTracker
@@ -136,6 +137,11 @@ class PersonalManager(CoreManager):
         except Exception:
             self.agenda = None
 
+        # V6.4.2.1 : arbitrage court des capacités après UnderstandingEngine.
+        # Il n'exécute rien lui-même : il choisit seulement le propriétaire.
+        self.action_decider = ActionDecisionEngine(self.llm)
+        self._current_action_decision = None
+
         self.conversation_tracker = ConversationTracker()
         # Première installation : récupère le tampon V4.7 afin de conserver
         # immédiatement une continuité après la mise à jour.
@@ -164,6 +170,89 @@ class PersonalManager(CoreManager):
         )
 
 
+
+    # =========================================================
+    # CENTRAL SEMANTIC PRE-ROUTING V6.4.2
+    # =========================================================
+
+    def _v642_prepare_understanding(
+        self,
+        message: str,
+    ):
+        try:
+            result = self.understanding.analyze(message)
+        except Exception:
+            return None
+
+        self._current_understanding = result
+        # CoreManager consommera cette compréhension au lieu de rappeler
+        # Ollama une seconde fois si le message continue jusqu'à super().handle().
+        self._precomputed_understanding = result
+        self._precomputed_understanding_message = str(message or "").strip()
+        return result
+
+    @staticmethod
+    def _v642_semantic_agenda_owned(
+        understanding,
+    ) -> bool:
+        if understanding is None:
+            return False
+        try:
+            confidence = float(
+                getattr(
+                    understanding,
+                    "agenda_confidence",
+                    0.0,
+                )
+                or 0.0
+            )
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return bool(
+            getattr(
+                understanding,
+                "agenda_requested",
+                False,
+            )
+        ) and confidence >= 0.58
+
+
+    # =========================================================
+    # CENTRAL ACTION DECISION PIPELINE V6.4.2.1
+    # =========================================================
+
+    def _v6421_action_decision(
+        self,
+        message: str,
+        understanding,
+    ):
+        decider = getattr(self, "action_decider", None)
+        if decider is None:
+            return None
+
+        try:
+            previous = self._v63_last_user_statement() or ""
+        except Exception:
+            previous = ""
+
+        try:
+            decision = decider.decide(
+                message,
+                understanding,
+                previous_user_message=previous,
+            )
+        except Exception:
+            return None
+
+        self._current_action_decision = decision
+        return decision
+
+    @staticmethod
+    def _v6421_decision_owner(decision) -> str:
+        if decision is None:
+            return "unknown"
+        return str(getattr(decision, "owner", "unknown") or "unknown").strip().lower()
+
     # =========================================================
     # PERSONAL AGENDA / TODO V6.4
     # =========================================================
@@ -171,12 +260,16 @@ class PersonalManager(CoreManager):
     def _v64_agenda_response(
         self,
         message: str,
+        understanding=None,
     ) -> str | None:
         agenda = getattr(self, "agenda", None)
         if agenda is None:
             return None
         try:
-            return agenda.handle_message(message)
+            return agenda.handle_message(
+                message,
+                understanding=understanding,
+            )
         except Exception:
             return None
 
@@ -1675,6 +1768,16 @@ class PersonalManager(CoreManager):
                 + (subject or "oui")
             )
 
+        if bool(getattr(understanding, "agenda_requested", False)):
+            lines.append(
+                "- agenda : "
+                + str(getattr(understanding, "agenda_action", "query"))
+                + " / "
+                + str(getattr(understanding, "agenda_view", "program"))
+                + " / cible="
+                + str(getattr(understanding, "agenda_target", "") or "(implicite)")
+            )
+
         return "\n".join(lines)
 
     def _v62_thread_context(
@@ -2305,10 +2408,36 @@ MESSAGE COURANT :
             self._track_exchange(value, autonomy_response)
             return autonomy_response
 
-        # V6.4 — agenda AVANT mémoire personnelle, Researcher et missions.
-        # Ainsi « aujourd'hui il faut que je fasse... » devient une liste de
-        # tâches personnelle et ne peut pas être interprété comme une recherche.
-        agenda_response = self._v64_agenda_response(value)
+        # V6.4.2 — compréhension sémantique AVANT les routeurs spécialisés.
+        # Elle permet de reconnaître « je dois faire quoi samedi ? » comme une
+        # consultation d'agenda sans dépendre d'une phrase-clé exacte.
+        understanding = self._v642_prepare_understanding(value)
+        decision = self._v6421_action_decision(
+            value,
+            understanding,
+        )
+
+        # V6.4.2.1 — la décision centrale prime. Si UnderstandingEngine a
+        # oublié le champ agenda, l'arbitre court peut encore reconnaître le
+        # sens de la phrase avant tout accès au Web.
+        agenda_response = None
+        if self._v6421_decision_owner(decision) == "agenda":
+            agenda = getattr(self, "agenda", None)
+            if agenda is not None:
+                try:
+                    agenda_response = agenda.handle_decision(
+                        value,
+                        decision,
+                    )
+                except Exception:
+                    agenda_response = None
+
+        # Les routes V6.4/V6.4.2 restent un filet de sécurité compatible.
+        if agenda_response is None:
+            agenda_response = self._v64_agenda_response(
+                value,
+                understanding=understanding,
+            )
         if agenda_response is not None:
             self.memory.add_session("user", value)
             self.memory.add_session("assistant", agenda_response)
@@ -2323,7 +2452,18 @@ MESSAGE COURANT :
             self._track_exchange(value, memory_v2_command)
             return memory_v2_command
 
-        if self._v63_personal_statement(value):
+        decision_owner = self._v6421_decision_owner(decision)
+        decision_action = str(
+            getattr(decision, "action", "") or ""
+        ).strip().lower() if decision is not None else ""
+
+        should_observe_personal = self._v63_personal_statement(value)
+        if decision_owner == "agenda":
+            should_observe_personal = False
+        elif decision_owner == "personal_memory" and decision_action == "remember":
+            should_observe_personal = True
+
+        if should_observe_personal:
             try:
                 self.memory.personal_memory_v2_observe(value)
             except Exception:
@@ -2348,7 +2488,22 @@ MESSAGE COURANT :
             self._track_exchange(value, private_response)
             return private_response
 
-        research_response = self._research_response(value)
+        # V6.4.2.1 : l'arbitre central décide si le Web est une capacité
+        # pertinente. Les domaines internes ne tombent plus accidentellement
+        # dans ResearchGateway à cause d'une formulation imprévue.
+        decision_owner = self._v6421_decision_owner(decision)
+        if decision_owner == "external":
+            research_response = self._research_response(value)
+        elif decision_owner in {
+            "agenda",
+            "personal_memory",
+            "conversation",
+            "agent_work",
+            "operational",
+        }:
+            research_response = None
+        else:
+            research_response = self._research_response(value)
         if research_response is not None:
             research_response = self._sanitize_response_for_user(
                 value,

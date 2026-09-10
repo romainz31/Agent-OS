@@ -29,7 +29,7 @@ class PersonalAgenda:
     prévu / à faire. Les réponses de Paul ne sont jamais importées ici.
     """
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 4
 
     WEEKDAYS = {
         "lundi": 0,
@@ -159,6 +159,7 @@ class PersonalAgenda:
         self.now_provider = now_provider
         self._last_view: tuple[str, date] | None = None
         self._ensure_schema()
+        self._deduplicate_items()
 
     # =========================================================
     # BASIC HELPERS
@@ -195,6 +196,8 @@ class PersonalAgenda:
             (r"\bcest\b", "c est"),
             (r"\bquest\b", "qu est"),
             (r"\bjusqua\b", "jusqu a"),
+            (r"\bsamdi\b", "samedi"),
+            (r"\baujoudhui\b", "aujourd hui"),
         )
         for pattern, replacement in replacements:
             text = re.sub(pattern, replacement, text)
@@ -234,6 +237,204 @@ class PersonalAgenda:
                 "que dois je",
             )
         ) or str(message or "").strip().endswith("?")
+
+
+    # =========================================================
+    # AGENDA IDENTITY / DEDUP V6.4.2.1
+    # =========================================================
+
+    @classmethod
+    def _canonical_identity(cls, value: Any) -> str:
+        """Identité stable pour comparer deux formulations équivalentes."""
+        n = cls.normalize(value)
+        # l'aéroport -> l aeroport ; laeroport -> laeroport.
+        # On compacte les élisions françaises pour que les deux soient égales.
+        n = re.sub(
+            r"\b([ldjtmnsc])\s+([aeiouyh])",
+            r"\1\2",
+            n,
+        )
+        return " ".join(n.split())
+
+    @staticmethod
+    def _display_quality(value: str) -> tuple[int, int]:
+        raw = str(value or "")
+        score = 0
+        if "'" in raw or "’" in raw:
+            score += 3
+        if any(ch in raw for ch in "àâäéèêëîïôöùûüç"):
+            score += 2
+        if any(ch.isupper() for ch in raw[1:]):
+            score += 1
+        return score, len(raw)
+
+    def _deduplicate_items(self) -> None:
+        """Masque les doublons historiques sans perdre l'entrée la plus propre."""
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    """
+                    SELECT * FROM agenda_items
+                    WHERE status='pending'
+                    ORDER BY id
+                    """
+                ).fetchall()
+
+                groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+                for row in rows:
+                    item = dict(row)
+                    key = (
+                        str(item.get("kind", "")),
+                        str(item.get("due_date", "")),
+                        str(item.get("start_time") or ""),
+                        self._canonical_identity(item.get("title", "")),
+                    )
+                    groups.setdefault(key, []).append(item)
+
+                now = self._now().isoformat()
+                for key, items in groups.items():
+                    if not key[3]:
+                        continue
+                    best = max(
+                        items,
+                        key=lambda item: self._display_quality(
+                            str(item.get("title", ""))
+                        ),
+                    )
+                    best_id = int(best["id"])
+                    best_title = self._clean(best.get("title", ""))
+                    db.execute(
+                        """
+                        UPDATE agenda_items
+                        SET title=?, normalized_title=?, updated_at=?
+                        WHERE id=?
+                        """,
+                        (best_title, key[3], now, best_id),
+                    )
+                    for item in items:
+                        item_id = int(item["id"])
+                        if item_id == best_id:
+                            continue
+                        db.execute(
+                            """
+                            UPDATE agenda_items
+                            SET status='cancelled', updated_at=?
+                            WHERE id=?
+                            """,
+                            (now, item_id),
+                        )
+        except Exception:
+            # La déduplication ne doit jamais empêcher Paul de démarrer.
+            return
+
+    def _existing_equivalent_item(
+        self,
+        *,
+        kind: str,
+        title: str,
+        due_date: date,
+        start_time: str | None,
+    ) -> dict[str, Any] | None:
+        wanted = self._canonical_identity(title)
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT * FROM agenda_items
+                WHERE kind=? AND due_date=?
+                  AND COALESCE(start_time, '') = COALESCE(?, '')
+                  AND status != 'cancelled'
+                ORDER BY id
+                """,
+                (kind, due_date.isoformat(), start_time),
+            ).fetchall()
+        for row in rows:
+            item = dict(row)
+            if self._canonical_identity(item.get("title", "")) == wanted:
+                return item
+        return None
+
+    @staticmethod
+    def _memory_people(item: dict[str, Any]) -> list[str]:
+        raw = item.get("people")
+        if isinstance(raw, list):
+            return [str(v).strip() for v in raw if str(v).strip()]
+        raw = item.get("people_json")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                value = json.loads(raw)
+                if isinstance(value, list):
+                    return [str(v).strip() for v in value if str(v).strip()]
+            except Exception:
+                pass
+        return []
+
+    def _memory_notable_label(
+        self,
+        item: dict[str, Any],
+        wanted: str,
+    ) -> str:
+        content = self._clean(item.get("content", ""))
+        n = self.normalize(content)
+        start = str(item.get("event_start") or "")[:10]
+        end = str(item.get("event_end") or "")[:10]
+        people = self._memory_people(item)
+        person = people[0] if people else ""
+
+        if end == wanted and start and start != end and "voyage" in n:
+            return (
+                f"Fin du voyage de {person}"
+                if person
+                else "Fin d'un voyage personnel"
+            )
+        if start == wanted and "voyage" in n and person:
+            return f"Départ en voyage de {person}"
+        return content
+
+    @classmethod
+    def _unique_labels(cls, values: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            key = cls._canonical_identity(value)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(value)
+        return result
+
+    def handle_decision(
+        self,
+        message: str,
+        decision: Any,
+    ) -> str | None:
+        """Exécute une décision centrale sans refaire de classification."""
+        if decision is None:
+            return None
+        if str(getattr(decision, "owner", "")) != "agenda":
+            return None
+        try:
+            confidence = float(getattr(decision, "confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence < 0.50:
+            return None
+
+        class Adapter:
+            pass
+
+        adapted = Adapter()
+        adapted.agenda_requested = True
+        adapted.agenda_confidence = max(0.60, confidence)
+        adapted.agenda_action = str(getattr(decision, "action", "query") or "query")
+        adapted.agenda_view = str(getattr(decision, "view", "program") or "program")
+        if adapted.agenda_view == "none":
+            adapted.agenda_view = "program"
+        adapted.agenda_target = str(getattr(decision, "target", "") or "")
+        adapted.agenda_subject = str(getattr(decision, "subject", "") or "")
+        adapted.agenda_field = str(getattr(decision, "field", "none") or "none")
+        adapted.agenda_time = ""
+
+        return self.handle_understanding(message, adapted)
 
     # =========================================================
     # SQLITE
@@ -416,22 +617,32 @@ class PersonalAgenda:
         title = self._clean(title).strip(" .,:;-")
         if not title:
             raise ValueError("Titre d'agenda vide")
-        normalized = self.normalize(title)
+        normalized = self._canonical_identity(title)
         now = self._now().isoformat()
-        with self._connect() as db:
-            row = db.execute(
-                """
-                SELECT id FROM agenda_items
-                WHERE kind=? AND normalized_title=? AND due_date=?
-                  AND COALESCE(start_time, '') = COALESCE(?, '')
-                  AND status != 'cancelled'
-                LIMIT 1
-                """,
-                (kind, normalized, due_date.isoformat(), start_time),
-            ).fetchone()
-            if row is not None:
-                return int(row["id"]), False
 
+        equivalent = self._existing_equivalent_item(
+            kind=kind,
+            title=title,
+            due_date=due_date,
+            start_time=start_time,
+        )
+        if equivalent is not None:
+            existing_id = int(equivalent["id"])
+            existing_title = str(equivalent.get("title", "") or "")
+            # Garde la formulation la plus lisible sans créer un doublon.
+            if self._display_quality(title) > self._display_quality(existing_title):
+                with self._connect() as db:
+                    db.execute(
+                        """
+                        UPDATE agenda_items
+                        SET title=?, normalized_title=?, source_text=?, updated_at=?
+                        WHERE id=?
+                        """,
+                        (title, normalized, self._clean(source_text), now, existing_id),
+                    )
+            return existing_id, False
+
+        with self._connect() as db:
             cursor = db.execute(
                 """
                 INSERT INTO agenda_items(
@@ -831,14 +1042,10 @@ class PersonalAgenda:
                 continue
             if not any(marker in n for marker in self.EVENT_MARKERS):
                 continue
-            label = content
-            start = str(item.get("event_start") or "")[:10]
-            end = str(item.get("event_end") or "")[:10]
-            if end == wanted and start and start != end:
-                label = "Fin / échéance : " + content
-            if label not in result:
+            label = self._memory_notable_label(item, wanted)
+            if label:
                 result.append(label)
-        return result[:5]
+        return self._unique_labels(result)[:5]
 
     def program_for_date(
         self,
@@ -890,7 +1097,229 @@ class PersonalAgenda:
 
         return "\n".join(lines)
 
+    # =========================================================
+    # NATURAL AGENDA PROPERTY QUERIES V6.4.1
+    # =========================================================
+
+    @classmethod
+    def _agenda_property_kind(cls, message: str) -> str | None:
+        # Détecte les questions naturelles portant sur l'agenda personnel.
+        if not cls._question_like(message):
+            return None
+
+        n = cls.normalize(message)
+
+        schedule_anchor = any(
+            marker in n
+            for marker in (
+                "je dois",
+                "dois je",
+                "j ai rendez vous",
+                "j ai rdv",
+                "mon rendez vous",
+                "mon rdv",
+                "mes rendez vous",
+                "mes rdv",
+                "j ai de prevu",
+                "je vais",
+                "il faut que j aille",
+                "il faut que je sois",
+                "ou je dois",
+                "ou dois je",
+                "quand je dois",
+                "quand dois je",
+            )
+        )
+
+        if not schedule_anchor:
+            return None
+
+        if n.startswith(
+            (
+                "ou ",
+                "a quel endroit ",
+                "a quelle adresse ",
+                "quel endroit ",
+                "quelle adresse ",
+            )
+        ):
+            return "where"
+
+        if n.startswith(
+            (
+                "a quelle heure ",
+                "quelle heure ",
+                "quand ",
+            )
+        ):
+            return "when"
+
+        return None
+
+    @classmethod
+    def _extract_location_from_item(
+        cls,
+        item: dict[str, Any],
+    ) -> str | None:
+        # Extrait prudemment un lieu explicite d'une entrée d'agenda.
+        candidates = [
+            str(item.get("title", "") or ""),
+            str(item.get("source_text", "") or ""),
+        ]
+
+        for raw in candidates:
+            raw = cls._clean(raw)
+            if not raw:
+                continue
+
+            airport = re.search(
+                r"\b(?:a|à)\s+(?:l['’]?\s*)?(?:aeroport|aéroport)\b",
+                raw,
+                flags=re.IGNORECASE,
+            )
+            if airport:
+                return "à l'aéroport"
+
+            m = re.search(
+                r"\bchez\s+([^,;.!?]+)",
+                raw,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                value = cls._clean(m.group(1)).strip(" ,;:-")
+                if value:
+                    return "chez " + value
+
+            m = re.search(
+                r"\b(au|aux)\s+([^,;.!?]+)",
+                raw,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                value = cls._clean(m.group(2)).strip(" ,;:-")
+                if value:
+                    return m.group(1).lower() + " " + value
+
+            m = re.search(
+                r"\b(?:a|à)\s+([^,;.!?]+)",
+                raw,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                value = cls._clean(m.group(1)).strip(" ,;:-")
+                normalized = cls.normalize(value)
+                if (
+                    value
+                    and not re.fullmatch(
+                        r"\d{1,2}(?:h\d{0,2}|:\d{2})?",
+                        normalized,
+                    )
+                ):
+                    return "à " + value
+
+        return None
+
+    def _agenda_property_answer(
+        self,
+        message: str,
+    ) -> str | None:
+        # Répond à où/quand depuis agenda.db, sans Researcher.
+        kind = self._agenda_property_kind(message)
+        if kind is None:
+            return None
+
+        resolved = self.resolve_date(
+            message,
+            reference=self._now(),
+        )
+        target = (
+            resolved.value
+            if resolved is not None
+            else self._now().date()
+        )
+        today = self._now().date()
+        label = self._date_label(target, today)
+
+        items = self.items_for_date(
+            target,
+            status="pending",
+        )
+
+        if not items:
+            return f"Tu n'as rien de noté dans ton agenda pour {label}."
+
+        if kind == "where":
+            locations: list[str] = []
+            for item in items:
+                location = self._extract_location_from_item(item)
+                if location and location not in locations:
+                    locations.append(location)
+
+            self._last_view = ("program", target)
+
+            if len(locations) == 1:
+                return (
+                    f"{label.capitalize()}, tu dois aller "
+                    f"{locations[0]}."
+                )
+
+            if len(locations) > 1:
+                return (
+                    f"Pour {label}, tu as plusieurs lieux prévus : "
+                    + "; ".join(locations)
+                    + "."
+                )
+
+            titles = [
+                self._format_item(item)
+                for item in items
+            ]
+            return (
+                f"Pour {label}, tu as "
+                + "; ".join(titles[:5])
+                + " de noté, mais aucun lieu précis n'est indiqué."
+            )
+
+        if kind == "when":
+            timed = [
+                item
+                for item in items
+                if str(item.get("start_time") or "").strip()
+            ]
+
+            self._last_view = ("program", target)
+
+            if len(timed) == 1:
+                item = timed[0]
+                return (
+                    f"{label.capitalize()} à "
+                    f"{item['start_time']} : {item['title']}."
+                )
+
+            if len(timed) > 1:
+                return (
+                    f"Pour {label} : "
+                    + "; ".join(
+                        self._format_item(item)
+                        for item in timed[:8]
+                    )
+                    + "."
+                )
+
+            return (
+                f"C'est prévu pour {label}, "
+                "mais tu n'as pas indiqué d'heure."
+            )
+
+        return None
+
     def query(self, message: str) -> str | None:
+        # V6.4.1 : les questions naturelles sur le lieu/l'heure d'une
+        # obligation planifiée sont résolues par agenda.db avant le Web.
+        property_answer = self._agenda_property_answer(message)
+        if property_answer is not None:
+            return property_answer
+
         view = self._view_kind(message)
         if view is None:
             return None
@@ -904,6 +1333,577 @@ class PersonalAgenda:
         target = self._target_date(message).value
         self._last_view = (view, target)
         return self.program_for_date(target, view=view)
+
+
+    # =========================================================
+    # SEMANTIC AGENDA INTENT V6.4.2
+    # =========================================================
+
+    @staticmethod
+    def _semantic_value(
+        understanding: Any,
+        name: str,
+        default: Any = None,
+    ) -> Any:
+        if understanding is None:
+            return default
+        return getattr(understanding, name, default)
+
+    def _semantic_agenda_owned(
+        self,
+        understanding: Any,
+    ) -> bool:
+        if understanding is None:
+            return False
+        requested = bool(
+            self._semantic_value(
+                understanding,
+                "agenda_requested",
+                False,
+            )
+        )
+        try:
+            confidence = float(
+                self._semantic_value(
+                    understanding,
+                    "agenda_confidence",
+                    0.0,
+                )
+                or 0.0
+            )
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return requested and confidence >= 0.58
+
+    def _semantic_target_date(
+        self,
+        message: str,
+        understanding: Any,
+    ) -> tuple[date, str, bool]:
+        target_text = self._clean(
+            self._semantic_value(
+                understanding,
+                "agenda_target",
+                "",
+            )
+        )
+        resolved = None
+        if target_text:
+            resolved = self.resolve_date(
+                target_text,
+                reference=self._now(),
+            )
+        if resolved is None:
+            resolved = self.resolve_date(
+                message,
+                reference=self._now(),
+            )
+
+        today = self._now().date()
+        if resolved is None:
+            return today, self._date_label(today, today), False
+        return (
+            resolved.value,
+            self._date_label(resolved.value, today),
+            True,
+        )
+
+    def _semantic_upcoming_items(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        today = self._now().date().isoformat()
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT * FROM agenda_items
+                WHERE status='pending' AND due_date >= ?
+                ORDER BY due_date,
+                         CASE WHEN start_time IS NULL THEN 1 ELSE 0 END,
+                         start_time,
+                         id
+                LIMIT ?
+                """,
+                (today, max(1, int(limit))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _semantic_filter_subject(
+        self,
+        items: list[dict[str, Any]],
+        subject: str,
+    ) -> list[dict[str, Any]]:
+        wanted = self.normalize(subject)
+        if not wanted:
+            return items
+
+        generic = {
+            "tache",
+            "taches",
+            "todo",
+            "rendez vous",
+            "rdv",
+            "evenement",
+            "evenements",
+            "programme",
+            "planning",
+        }
+        if wanted in generic:
+            return items
+
+        wanted_tokens = self._tokens(wanted)
+        ranked: list[tuple[float, dict[str, Any]]] = []
+        for item in items:
+            haystack = " ".join(
+                (
+                    str(item.get("title", "") or ""),
+                    str(item.get("source_text", "") or ""),
+                )
+            )
+            normalized = self.normalize(haystack)
+            tokens = self._tokens(normalized)
+            overlap = len(wanted_tokens & tokens)
+            union = max(1, len(wanted_tokens | tokens))
+            score = overlap / union
+            if wanted and wanted in normalized:
+                score += 0.65
+            if normalized and normalized in wanted:
+                score += 0.35
+            if score > 0:
+                ranked.append((score, item))
+
+        ranked.sort(key=lambda row: row[0], reverse=True)
+        if not ranked:
+            return []
+        best = ranked[0][0]
+        return [
+            item
+            for score, item in ranked
+            if score >= max(0.18, best - 0.15)
+        ][:12]
+
+    def _semantic_location_from_item(
+        self,
+        item: dict[str, Any],
+    ) -> str | None:
+        extractor = getattr(
+            self,
+            "_extract_location_from_item",
+            None,
+        )
+        if callable(extractor):
+            try:
+                value = extractor(item)
+                if value:
+                    return str(value)
+            except Exception:
+                pass
+
+        for raw in (
+            str(item.get("title", "") or ""),
+            str(item.get("source_text", "") or ""),
+        ):
+            clean = self._clean(raw)
+            if not clean:
+                continue
+            m = re.search(
+                r"\b(?:a|à|au|aux|chez)\s+([^,;.!?]+)",
+                clean,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                prefix_match = re.search(
+                    r"\b(a|à|au|aux|chez)\s+",
+                    clean[m.start():],
+                    flags=re.IGNORECASE,
+                )
+                prefix = (
+                    prefix_match.group(1).lower()
+                    if prefix_match
+                    else "à"
+                )
+                value = self._clean(m.group(1)).strip(" ,;:-")
+                if value:
+                    return prefix + " " + value
+        return None
+
+    def _semantic_event_program(
+        self,
+        target: date,
+    ) -> str:
+        today = self._now().date()
+        label = self._date_label(target, today)
+        events = self.items_for_date(
+            target,
+            kind="event",
+        )
+        memory_events = self._memory_notable_events(target)
+        values = [
+            self._format_item(item)
+            for item in events
+        ]
+        values.extend(
+            event
+            for event in memory_events
+            if event not in values
+        )
+        self._last_view = ("event", target)
+        if values:
+            return (
+                f"Événements prévus pour {label} :\n- "
+                + "\n- ".join(values[:12])
+            )
+
+        # On garde les catégories distinctes, mais on signale les autres
+        # obligations du jour pour éviter une réponse inutilement vide.
+        todos = self.items_for_date(target, kind="todo")
+        appointments = self.items_for_date(
+            target,
+            kind="appointment",
+        )
+        if todos or appointments:
+            extras: list[str] = []
+            if appointments:
+                extras.append(
+                    "Rendez-vous : "
+                    + "; ".join(
+                        self._format_item(item)
+                        for item in appointments[:6]
+                    )
+                )
+            if todos:
+                extras.append(
+                    "À faire : "
+                    + "; ".join(
+                        self._format_item(item)
+                        for item in todos[:8]
+                    )
+                )
+            return (
+                f"Aucun événement notable distinct n'est noté pour {label}. "
+                + " ".join(extras)
+            )
+        return f"Aucun événement notable n'est noté pour {label}."
+
+    def _semantic_query_answer(
+        self,
+        message: str,
+        understanding: Any,
+    ) -> str:
+        view = str(
+            self._semantic_value(
+                understanding,
+                "agenda_view",
+                "program",
+            )
+            or "program"
+        ).strip().lower()
+        field = str(
+            self._semantic_value(
+                understanding,
+                "agenda_field",
+                "none",
+            )
+            or "none"
+        ).strip().lower()
+        subject = self._clean(
+            self._semantic_value(
+                understanding,
+                "agenda_subject",
+                "",
+            )
+        )
+
+        target, label, explicit_target = self._semantic_target_date(
+            message,
+            understanding,
+        )
+
+        if field in {"where", "when", "who"}:
+            if explicit_target:
+                items = self.items_for_date(
+                    target,
+                    status="pending",
+                )
+            else:
+                items = self._semantic_upcoming_items()
+
+            filtered = self._semantic_filter_subject(
+                items,
+                subject,
+            )
+            if filtered:
+                items = filtered
+
+            if not items:
+                if explicit_target:
+                    return (
+                        f"Tu n'as rien de correspondant dans ton agenda "
+                        f"pour {label}."
+                    )
+                return "Je n'ai rien de correspondant dans ton agenda."
+
+            if field == "where":
+                locations: list[str] = []
+                for item in items:
+                    location = self._semantic_location_from_item(item)
+                    if location and location not in locations:
+                        locations.append(location)
+                if len(locations) == 1:
+                    return f"Tu dois aller {locations[0]}."
+                if locations:
+                    return (
+                        "Tu as plusieurs lieux prévus : "
+                        + "; ".join(locations[:8])
+                        + "."
+                    )
+                return (
+                    "J'ai retrouvé ce qui est prévu, mais tu n'as pas "
+                    "indiqué le lieu."
+                )
+
+            if field == "when":
+                timed = [
+                    item
+                    for item in items
+                    if str(item.get("start_time") or "").strip()
+                ]
+                if len(timed) == 1:
+                    item = timed[0]
+                    return (
+                        f"{item['due_date']} à {item['start_time']} : "
+                        f"{item['title']}."
+                    )
+                if timed:
+                    return (
+                        "Horaires prévus : "
+                        + "; ".join(
+                            f"{item['due_date']} {item['start_time']} — "
+                            f"{item['title']}"
+                            for item in timed[:8]
+                        )
+                        + "."
+                    )
+                if explicit_target:
+                    return (
+                        f"C'est prévu pour {label}, mais tu n'as pas "
+                        "indiqué d'heure."
+                    )
+                if len(items) == 1:
+                    return (
+                        f"C'est prévu le {items[0]['due_date']}, mais sans "
+                        "heure précise."
+                    )
+                return (
+                    "J'ai retrouvé plusieurs éléments, mais aucun n'a "
+                    "d'heure précise."
+                )
+
+            # who : on ne déduit pas une personne absente. Le titre/source
+            # reste la seule preuve, donc on renvoie l'élément plutôt que
+            # d'inventer un accompagnant.
+            return (
+                "Dans ton agenda, j'ai : "
+                + "; ".join(
+                    self._format_item(item)
+                    for item in items[:8]
+                )
+                + "."
+            )
+
+        if view == "todo":
+            self._last_view = ("todo", target)
+            return self.program_for_date(
+                target,
+                view="todo",
+            )
+        if view == "appointment":
+            self._last_view = ("appointment", target)
+            return self.program_for_date(
+                target,
+                view="appointment",
+            )
+        if view == "event":
+            return self._semantic_event_program(target)
+
+        self._last_view = ("program", target)
+        return self.program_for_date(
+            target,
+            view="program",
+        )
+
+    def _semantic_add(
+        self,
+        message: str,
+        understanding: Any,
+    ) -> str:
+        view = str(
+            self._semantic_value(
+                understanding,
+                "agenda_view",
+                "todo",
+            )
+            or "todo"
+        ).strip().lower()
+        subject = self._clean(
+            self._semantic_value(
+                understanding,
+                "agenda_subject",
+                "",
+            )
+        ).strip(" .,:;-")
+        if not subject:
+            return (
+                "J'ai compris que tu veux ajouter quelque chose à ton "
+                "agenda, mais il me manque ce que je dois noter."
+            )
+
+        target, label, _ = self._semantic_target_date(
+            message,
+            understanding,
+        )
+        raw_time = self._clean(
+            self._semantic_value(
+                understanding,
+                "agenda_time",
+                "",
+            )
+        )
+        start_time = self.resolve_time(raw_time) if raw_time else None
+        if start_time is None:
+            start_time = self.resolve_time(message)
+
+        if view == "appointment":
+            _, created = self._add_item(
+                kind="appointment",
+                title=subject,
+                due_date=target,
+                start_time=start_time,
+                source_text=message,
+            )
+            self._last_view = ("appointment", target)
+            when = label + (f" à {start_time}" if start_time else "")
+            return (
+                f"Rendez-vous noté pour {when} : {subject}."
+                if created
+                else f"Ce rendez-vous était déjà noté pour {when}."
+            )
+
+        if view == "event":
+            _, created = self._add_item(
+                kind="event",
+                title=subject,
+                due_date=target,
+                start_time=start_time,
+                source_text=message,
+            )
+            self._last_view = ("event", target)
+            when = label + (f" à {start_time}" if start_time else "")
+            return (
+                f"Événement noté pour {when} : {subject}."
+                if created
+                else f"Cet événement était déjà noté pour {when}."
+            )
+
+        _, created = self._add_item(
+            kind="todo",
+            title=subject,
+            due_date=target,
+            start_time=start_time,
+            source_text=message,
+        )
+        self._last_view = ("todo", target)
+        return (
+            f"C'est noté pour {label} : {subject}."
+            if created
+            else f"Cette tâche était déjà notée pour {label}."
+        )
+
+    def _semantic_complete(
+        self,
+        understanding: Any,
+    ) -> str:
+        subject = self._clean(
+            self._semantic_value(
+                understanding,
+                "agenda_subject",
+                "",
+            )
+        )
+        if not subject:
+            return "Quelle tâche est terminée ?"
+
+        candidates = self._pending_todos_near(
+            self._now().date()
+        )
+        matched = self._semantic_filter_subject(
+            candidates,
+            subject,
+        )
+        if not matched:
+            return (
+                f"Je n'ai pas retrouvé de tâche ouverte correspondant à "
+                f"« {subject} »."
+            )
+        if len(matched) > 1:
+            return (
+                "J'ai plusieurs tâches possibles : "
+                + " / ".join(
+                    str(item.get("title", ""))
+                    for item in matched[:5]
+                )
+                + ". Laquelle est terminée ?"
+            )
+
+        item = matched[0]
+        now = self._now().isoformat()
+        with self._connect() as db:
+            db.execute(
+                """
+                UPDATE agenda_items
+                SET status='done', completed_at=?, updated_at=?
+                WHERE id=?
+                """,
+                (now, now, int(item["id"])),
+            )
+        return f"C'est noté : « {item['title']} » est fait."
+
+    def handle_understanding(
+        self,
+        message: str,
+        understanding: Any,
+    ) -> str | None:
+        if not self._semantic_agenda_owned(understanding):
+            return None
+
+        action = str(
+            self._semantic_value(
+                understanding,
+                "agenda_action",
+                "query",
+            )
+            or "query"
+        ).strip().lower()
+
+        if action == "query":
+            return self._semantic_query_answer(
+                message,
+                understanding,
+            )
+        if action == "add":
+            return self._semantic_add(
+                message,
+                understanding,
+            )
+        if action == "complete":
+            return self._semantic_complete(understanding)
+
+        return (
+            "J'ai compris que ta demande concerne ton agenda, mais je n'ai "
+            "pas identifié l'action à effectuer. Reformule simplement ce que "
+            "tu veux ajouter, consulter ou terminer."
+        )
 
     # =========================================================
     # COMMANDS / ROUTER
@@ -944,19 +1944,33 @@ class PersonalAgenda:
             self.looks_like_todo_capture(message)
             or self.looks_like_appointment_capture(message)
             or self.looks_like_event_capture(message)
+            or self._agenda_property_kind(message)
             or self._view_kind(message)
             or self._completion_payload(message)
         )
 
-    def handle_message(self, message: str) -> str | None:
+    def handle_message(
+        self,
+        message: str,
+        understanding: Any | None = None,
+    ) -> str | None:
         n = self.normalize(message)
         if n in {"agenda status", "agenda statut"}:
             return self.status_summary()
 
-        # Une vraie question de programme doit être lue avant les captures.
+        # Une vraie question reconnue déterministement garde la priorité.
         queried = self.query(message)
         if queried is not None:
             return queried
+
+        # V6.4.2 — sinon on exploite l'intention comprise par le LLM central.
+        # C'est ce chemin qui rend l'agenda souple sans multiplier les regex.
+        semantic = self.handle_understanding(
+            message,
+            understanding,
+        )
+        if semantic is not None:
+            return semantic
 
         completed = self.complete_todo(message)
         if completed is not None:

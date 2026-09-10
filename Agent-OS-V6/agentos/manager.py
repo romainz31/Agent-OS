@@ -2877,9 +2877,30 @@ MESSAGE :
             )
         )
 
-        understanding = self.understanding.analyze(
-            value
+        # PRECOMPUTED UNDERSTANDING V6.4.2 — PersonalManager peut analyser
+        # le message avant les routeurs spécialisés. CoreManager réutilise ce
+        # résultat pour ne pas faire un deuxième appel LLM.
+        precomputed = getattr(
+            self,
+            "_precomputed_understanding",
+            None,
         )
+        precomputed_message = getattr(
+            self,
+            "_precomputed_understanding_message",
+            None,
+        )
+        if (
+            precomputed is not None
+            and precomputed_message == value
+        ):
+            understanding = precomputed
+            self._precomputed_understanding = None
+            self._precomputed_understanding_message = None
+        else:
+            understanding = self.understanding.analyze(
+                value
+            )
 
         # NATURAL MANAGER V6.2 — rend la compréhension du tour courant disponible à la
         # surcouche conversationnelle PersonalManager.
