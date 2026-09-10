@@ -10,3 +10,11 @@ venv/
 *.tmp
 *.log
 .pytest_cache/
+# Patchs / installateurs temporaires
+APPLY_*.py
+/payload/
+/backups/
+
+# Documentation temporaire de patch
+LIRE_MOI_V*.txt
+README_V*_MEMORY.txt
