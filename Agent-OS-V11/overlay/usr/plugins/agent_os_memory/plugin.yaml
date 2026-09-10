@@ -1,0 +1,8 @@
+name: agent_os_memory
+title: Agent-OS Personal Memory
+description: Structured memory for Paul's tasks, appointments, life events, people, preferences and personal facts.
+version: 11.0.0
+settings_sections:
+  - agent
+per_project_config: false
+per_agent_config: false

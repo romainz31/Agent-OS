@@ -1,0 +1,5 @@
+timezone: Europe/Paris
+assistant_name: Paul
+auto_rollover_tasks: true
+default_query_limit: 20
+allow_inferred_facts: true
