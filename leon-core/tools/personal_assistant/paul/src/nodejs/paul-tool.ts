@@ -15,6 +15,21 @@ function timestamp(value: unknown, fallback = Date.now()): number {
   return fallback
 }
 
+function splitActivityObjects(value?: string): string[] {
+  const text = value?.trim() || ''
+  if (!text || !text.includes(',')) return text ? [text] : []
+
+  const parts = text
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const last = parts.at(-1) || ''
+  const lastAnd = last.split(/\s+et\s+/i).map((part) => part.trim()).filter(Boolean)
+
+  if (lastAnd.length <= 1) return parts
+  return [...parts.slice(0, -1), ...lastAnd]
+}
+
 export default class PaulTool extends Tool {
   private readonly config: ReturnType<typeof ToolkitConfig.load>
   private readonly service = new PaulService()
@@ -63,16 +78,20 @@ export default class PaulTool extends Tool {
     details?: Record<string, unknown>,
     sourceText?: string
   ): Promise<Record<string, unknown>> {
-    const result = this.service.recordActivity({
+    const activityObjects = splitActivityObjects(object)
+    const inputs = activityObjects.length > 0 ? activityObjects : [undefined]
+    const activities = inputs.map((activityObject) => this.service.recordActivity({
       occurredAt: timestamp(occurredAt),
       actor,
       action,
-      object,
+      object: activityObject,
       location,
       details,
       sourceText
-    })
-    return { success: true, activity: result }
+    }))
+    return activities.length === 1
+      ? { success: true, activity: activities[0] }
+      : { success: true, activities, splitFromCombinedInput: true }
   }
 
   public async createAgendaItem(
