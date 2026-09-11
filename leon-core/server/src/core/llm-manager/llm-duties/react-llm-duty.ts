@@ -799,6 +799,7 @@ export class ReActLLMDuty extends LLMDuty {
       isOutputRecoveryAttempt?: boolean
       isFinalizationAttempt?: boolean
       isCompletionReview?: boolean
+      isStructuredMemoryTurn?: boolean
       requiresToolAction?: boolean
       isContextRecoveryAttempt?: boolean
     },
@@ -869,7 +870,9 @@ export class ReActLLMDuty extends LLMDuty {
     // Finalization is still a model request. Keep its configured reasoning:
     // providers with mandatory reasoning reject a forced reasoning-off retry.
     const reasoningMode =
-      configuredReasoning === 'auto'
+      options.isStructuredMemoryTurn && providerName === 'llamacpp'
+        ? 'off'
+        : configuredReasoning === 'auto'
         ? inferencePolicy.reasoningMode
         : configuredReasoning === 'none'
           ? 'off'

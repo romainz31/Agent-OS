@@ -72,6 +72,26 @@ const callable: AgentCallableFunction = {
   }
 }
 
+const paulCallable: AgentCallableFunction = {
+  qualifiedName: 'personal_assistant.paul.saveFact',
+  toolkitId: 'personal_assistant',
+  toolId: 'paul',
+  functionName: 'saveFact',
+  functionConfig: {
+    description: 'Save a personal fact.',
+    parameters: {
+      type: 'object',
+      properties: {
+        subject: { type: 'string' },
+        predicate: { type: 'string' },
+        value: {}
+      },
+      required: ['subject', 'predicate', 'value'],
+      additionalProperties: false
+    }
+  }
+}
+
 function createCatalog(): AgentToolCatalog {
   return {
     tools: [
@@ -87,6 +107,25 @@ function createCatalog(): AgentToolCatalog {
     functionsByToolName: new Map([[CALLABLE_TOOL_NAME, callable]]),
     availableToolkitsById: new Map(),
     loadedToolkitIds: new Set(['test']),
+    loadedProgressiveGuidance: new Map()
+  }
+}
+
+function createPaulCatalog(): AgentToolCatalog {
+  return {
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'personal_assistant__paul__saveFact',
+          description: paulCallable.functionConfig.description,
+          parameters: paulCallable.functionConfig.parameters
+        }
+      }
+    ],
+    functionsByToolName: new Map([['personal_assistant__paul__saveFact', paulCallable]]),
+    availableToolkitsById: new Map(),
+    loadedToolkitIds: new Set(['personal_assistant']),
     loadedProgressiveGuidance: new Map()
   }
 }
@@ -147,6 +186,64 @@ describe('continuous agent loop', () => {
     expect(result.transcript.at(-1)).toMatchObject({
       role: 'assistant', content: 'It is sunny.', reasoning: 'The lookup confirms sunny weather.'
     })
+  })
+
+  it('does not run completion review after a successful Paul memory write', async () => {
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({
+        toolCalls: [toolCall('save-fact', 'personal_assistant__paul__saveFact', {
+          subject: 'Romain', predicate: 'lives in', value: 'Brens'
+        })]
+      })
+      .mockResolvedValueOnce({ textContent: 'C’est enregistré dans ma mémoire.' })
+
+    const result = await runAgentLoopWithCompletionReview({
+      transcript: [{ role: 'user', content: 'Je m’appelle Romain et j’habite à Brens.' }],
+      catalog: createPaulCatalog(),
+      callModel,
+      executeFunction: async () => ({ execution: {
+        function: paulCallable.qualifiedName,
+        status: 'success',
+        observation: JSON.stringify({ success: true, fact: {
+          subject: 'Romain', predicate: 'lives in', value: 'Brens'
+        } })
+      } }),
+      loadAgentSkill: async () => null
+    })
+
+    expect(result.answer).toBe('C’est enregistré dans ma mémoire.')
+    expect(callModel).toHaveBeenCalledTimes(2)
+    expect(callModel.mock.calls[0]?.[2]).toMatchObject({ requiresToolAction: true })
+    expect(callModel.mock.calls[1]?.[2]).toMatchObject({ isStructuredMemoryTurn: true })
+    expect(callModel.mock.calls.some((call) => call[2]?.isCompletionReview)).toBe(false)
+  })
+
+  it('falls back to the successful Paul result when the final model output is empty', async () => {
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({
+        toolCalls: [toolCall('save-fact', 'personal_assistant__paul__saveFact', {
+          subject: 'Romain', predicate: 'lives in', value: 'Brens'
+        })]
+      })
+      .mockResolvedValue({})
+
+    const result = await runAgentLoopWithCompletionReview({
+      transcript: [{ role: 'user', content: 'Je m’appelle Romain et j’habite à Brens.' }],
+      catalog: createPaulCatalog(),
+      callModel,
+      executeFunction: async () => ({ execution: {
+        function: paulCallable.qualifiedName,
+        status: 'success',
+        observation: JSON.stringify({ success: true, fact: {
+          subject: 'Romain', predicate: 'lives in', value: 'Brens'
+        } })
+      } }),
+      loadAgentSkill: async () => null
+    })
+
+    expect(result.intent).toBe('answer')
+    expect(result.answer).toContain('Romain habite à Brens')
+    expect(callModel.mock.calls.some((call) => call[2]?.isCompletionReview)).toBe(false)
   })
 
   it('emits tool-accompanying progress and retains collection details through continuation', async () => {
@@ -1559,6 +1656,38 @@ describe('continuous agent loop', () => {
         'What is the weather like in Shenzhen?'
       )
     ).toBe('weather')
+  })
+
+  it('preloads Paul for French personal activities and exact history questions', () => {
+    coreMocks.getFlattenedTools.mockReturnValue([
+      {
+        toolkitId: 'personal_assistant',
+        toolkitName: 'Personal Assistant',
+        toolkitDescription: 'Paul personal memory and journal.',
+        toolId: 'paul',
+        toolName: 'Paul',
+        toolDescription: 'Record and query personal data.'
+      },
+      {
+        toolkitId: 'structured_knowledge',
+        toolkitName: 'Structured Knowledge',
+        toolkitDescription: 'Read generated context files.',
+        toolId: 'context',
+        toolName: 'Context',
+        toolDescription: 'Search context.'
+      }
+    ])
+
+    expect(
+      findHighConfidenceAgentToolkitId(
+        'hier j’ai nettoyé la machine à café, la fontaine à chat et les toilettes'
+      )
+    ).toBe('personal_assistant')
+    expect(
+      findHighConfidenceAgentToolkitId(
+        'quand est-ce que j’ai nettoyé les toilettes pour la dernière fois ?'
+      )
+    ).toBe('personal_assistant')
   })
 
   it('keeps model-led discovery when registry metadata is ambiguous', () => {

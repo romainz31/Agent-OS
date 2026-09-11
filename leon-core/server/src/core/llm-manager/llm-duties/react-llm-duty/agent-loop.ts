@@ -178,6 +178,7 @@ interface AgentModelCallOptions {
   isOutputRecoveryAttempt?: boolean
   isFinalizationAttempt?: boolean
   isCompletionReview?: boolean
+  isStructuredMemoryTurn?: boolean
   requiresToolAction?: boolean
   isContextRecoveryAttempt?: boolean
 }
@@ -368,6 +369,11 @@ export function findHighConfidenceAgentToolkitId(input: string): string | null {
       getToolkitRoutingLabels(toolkit)
     ])
   )
+
+  if (toolkitLabels.has('personal_assistant') && isLikelyPaulRequest(input)) {
+    return 'personal_assistant'
+  }
+
   const exactMatches = new Set<string>()
 
   for (const [toolkitId, labels] of toolkitLabels) {
@@ -395,6 +401,29 @@ export function findHighConfidenceAgentToolkitId(input: string): string | null {
   return exactMatches.size === 1
     ? exactMatches.values().next().value || null
     : null
+}
+
+function isLikelyPaulRequest(input: string): boolean {
+  const normalized = input
+    .normalize('NFKC')
+    .toLocaleLowerCase('fr-FR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const patterns = [
+    /\b(je m appelle|j habite|j aime|je travaille|ma copine|mon copain|ma relation|chez moi)\b/,
+    /\b(qu est ce que tu sais|ce que tu sais|comment je m appelle|ou est ce que j habite)\b/,
+    /\b(quand|combien|derniere fois|dernier fois|quel jour)\b.*\b(j ai|nettoy|fait|jou|achete|allee|emmen|activit|toilette|machine|fontaine)\b/,
+    /\b(j ai|je viens de|hier|aujourd hui|ce matin|ce soir)\b.*\b(nettoy|fait|jou|achete|allee|emmen|ranger|menage|activit)\b/,
+    /\b(hier|aujourd hui|ce matin|ce soir)\b.*\b(j ai|nettoy|fait|jou|achete|allee|emmen|ranger|menage|activit)\b/,
+    /\b(programme|agenda|rappel|rappelle|tache|taches|rendez vous|evenement|prevu|dois faire)\b/,
+    /\b(humeur|ressenti|senti|habitude|habitudes)\b/
+  ]
+
+  return patterns.some((pattern) => pattern.test(normalized))
 }
 
 /**
@@ -604,6 +633,98 @@ function addToolCallTitleParameter(
   }
 }
 
+function isPaulOnlyCatalog(catalog: AgentToolCatalog): boolean {
+  const callables = [...catalog.functionsByToolName.values()]
+
+  return callables.length > 0 && callables.every((callable) =>
+    callable.toolkitId === 'personal_assistant' && callable.toolId === 'paul'
+  )
+}
+
+function isSuccessfulPaulTurn(
+  executionHistory: ExecutionRecord[],
+  trackedSteps: TrackedPlanStep[]
+): boolean {
+  return trackedSteps.length === 0 &&
+    executionHistory.length > 0 &&
+    executionHistory.every((execution) =>
+      execution.status === 'success' &&
+      execution.function.startsWith('personal_assistant.paul.')
+    )
+}
+
+function formatPaulValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map(formatPaulValue).filter(Boolean).join(', ')
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if (typeof record['location'] === 'string') return record['location']
+    return Object.entries(record)
+      .map(([key, nestedValue]) => `${key}: ${formatPaulValue(nestedValue)}`)
+      .filter((entry) => !entry.endsWith(': '))
+      .join(', ')
+  }
+  return String(value)
+}
+
+function translatePaulPredicate(predicate: string): string {
+  const translations: Record<string, string> = {
+    'lives in': 'habite à',
+    name: 's’appelle',
+    likes: 'aime',
+    'works at': 'travaille à'
+  }
+  return translations[predicate.toLocaleLowerCase('en-US')] || predicate
+}
+
+function buildPaulFallbackAnswer(executionHistory: ExecutionRecord[]): string {
+  const execution = executionHistory.at(-1)
+  if (!execution) return 'La mémoire de Paul est disponible.'
+
+  const output = parseToolCallArguments(execution.observation)
+  const functionName = execution.function.split('.').at(-1)
+  if (functionName === 'saveFact') {
+    const fact = output?.['fact'] as Record<string, unknown> | undefined
+    if (fact) {
+      return `C'est enregistré dans ma mémoire : ${formatPaulValue(fact['subject'])} ${translatePaulPredicate(formatPaulValue(fact['predicate']))} ${formatPaulValue(fact['value'])}.`
+    }
+    return 'C’est enregistré dans la mémoire de Paul.'
+  }
+  if (functionName === 'saveRelationship') {
+    const relationship = output?.['relationship'] as Record<string, unknown> | undefined
+    if (relationship) {
+      const subject = formatPaulValue(relationship['subject'])
+      const relation = formatPaulValue(relationship['relation'])
+      const object = formatPaulValue(relationship['object'])
+      if (relation.toLocaleLowerCase('fr-FR') === 'partner') {
+        return `C’est enregistré : ${subject} et ${object} sont en couple.`
+      }
+      return `C’est enregistré : ${subject} — ${relation} — ${object}.`
+    }
+    return 'La relation est enregistrée dans la mémoire de Paul.'
+  }
+  if (functionName === 'getContext') {
+    const context = output?.['context'] as Record<string, unknown> | undefined
+    const profile = context?.['profile'] as Record<string, unknown> | undefined
+    const facts = Array.isArray(profile?.['facts'])
+      ? profile['facts'] as Array<Record<string, unknown>>
+      : []
+    const relationships = Array.isArray(profile?.['relationships'])
+      ? profile['relationships'] as Array<Record<string, unknown>>
+      : []
+    const lines = [
+      ...facts.map((fact) => `- ${formatPaulValue(fact['subject'])} ${translatePaulPredicate(formatPaulValue(fact['predicate']))} ${formatPaulValue(fact['value'])}.`),
+      ...relationships.map((relationship) => `- ${formatPaulValue(relationship['subject'])} ${formatPaulValue(relationship['relation'])} ${formatPaulValue(relationship['object'])}.`)
+    ].filter((line) => line !== '-  .')
+    return lines.length > 0
+      ? `Voici ce que je sais pour le moment :\n${lines.join('\n')}`
+      : 'Je n’ai pas encore d’informations personnelles enregistrées.'
+  }
+  return 'L’information a bien été traitée par Paul.'
+}
+
 /**
  * Converts persisted owner/Leon messages into the same transcript that will
  * receive agent tool calls. The current owner request is omitted when it was
@@ -674,6 +795,10 @@ export async function runAgentLoop(
     // the rest of the run instead of allowing the prompt to grow back.
     let isContextRecoveryAttempt = hasUsedContextRecovery
     const remainingIterations = iterationLimit - iteration
+    const isPaulOnlyTurn = isPaulOnlyCatalog(params.catalog)
+    const requiresPaulTool = isPaulOnlyTurn &&
+      executionHistory.length === 0 &&
+      trackedSteps.length === 0
 
     while (true) {
       try {
@@ -682,7 +807,8 @@ export async function runAgentLoop(
           params.catalog.tools,
           {
             isRecoveryAttempt,
-            ...(requiresToolAction ? { requiresToolAction: true } : {}),
+            ...(isPaulOnlyTurn ? { isStructuredMemoryTurn: true } : {}),
+            ...(requiresToolAction || requiresPaulTool ? { requiresToolAction: true } : {}),
             ...(isOutputRecoveryAttempt ? { isOutputRecoveryAttempt: true } : {}),
             ...(isContextRecoveryAttempt
               ? { isContextRecoveryAttempt: true }
@@ -775,7 +901,8 @@ export async function runAgentLoop(
     }
     if (toolCalls.length === 0) {
       if (textContent) {
-        if (executionHistory.length > 0 || trackedSteps.length > 0) {
+        if ((executionHistory.length > 0 || trackedSteps.length > 0) &&
+            !isSuccessfulPaulTurn(executionHistory, trackedSteps)) {
           // Review only a proposed ending, not every action. Reuse the same
           // provider, budget and evidence; the check cannot execute tools.
           const review = await reviewAgentCompletion(
@@ -813,6 +940,12 @@ export async function runAgentLoop(
           executionHistory,
           trackedSteps
         }
+      }
+
+      if (isSuccessfulPaulTurn(executionHistory, trackedSteps)) {
+        const answer = buildPaulFallbackAnswer(executionHistory)
+        transcript.push({ role: 'assistant', content: answer })
+        return { answer, intent: 'answer', transcript, executionHistory, trackedSteps }
       }
 
       return {

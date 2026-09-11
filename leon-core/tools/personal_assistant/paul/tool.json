@@ -1,0 +1,163 @@
+{
+  "$schema": "../../../schemas/tool-schemas/tool.json",
+  "tool_id": "paul",
+  "toolkit_id": "personal_assistant",
+  "name": "Paul",
+  "description": "Store and query Romain's structured personal facts, relationships, activities, agenda, mood and habits.",
+  "icon_name": "heart-3-line",
+  "functions": {
+    "saveFact": {
+      "description": "Save one durable personal fact. Use this for identity, home, preference or other stable information.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "subject": { "type": "string" },
+          "predicate": { "type": "string" },
+          "value": {},
+          "canonicalText": { "type": "string" },
+          "sourceText": { "type": "string" },
+          "confidence": { "type": "number" }
+        },
+        "required": ["subject", "predicate", "value"],
+        "additionalProperties": false
+      }
+    },
+    "saveRelationship": {
+      "description": "Save a relationship between two people, such as Coralie is Romain's partner.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "subject": { "type": "string" },
+          "relation": { "type": "string" },
+          "object": { "type": "string" },
+          "sourceText": { "type": "string" },
+          "confidence": { "type": "number" }
+        },
+        "required": ["subject", "relation", "object"],
+        "additionalProperties": false
+      }
+    },
+    "recordActivity": {
+      "description": "MANDATORY for every completed personal action. Record one activity only. If the owner lists several completed actions, call this function once per distinct action so Paul can answer exact last-time and count questions. Resolve relative dates such as hier, aujourd'hui and demain in occurredAt. Do not use saveFact, Context or OWNER.md for activities.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "occurredAt": { "type": "string", "description": "ISO timestamp or YYYY-MM-DD" },
+          "actor": { "type": "string" },
+          "action": { "type": "string" },
+          "object": { "type": "string" },
+          "location": { "type": "string" },
+          "details": { "type": "object" },
+          "sourceText": { "type": "string" }
+        },
+        "required": ["occurredAt", "action"],
+        "additionalProperties": false
+      }
+    },
+    "createAgendaItem": {
+      "description": "Create a dated task, appointment, personal event or reminder. Keep the types distinct.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string", "enum": ["task", "appointment", "event", "reminder"] },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "startAt": { "type": "string" },
+          "dueAt": { "type": "string" },
+          "endAt": { "type": "string" },
+          "timezone": { "type": "string" },
+          "relatedPerson": { "type": "string" },
+          "recurrence": { "type": "object" },
+          "sourceText": { "type": "string" }
+        },
+        "required": ["kind", "title"],
+        "additionalProperties": false
+      }
+    },
+    "completeAgendaItem": {
+      "description": "Mark a task, reminder or other agenda item as completed using its id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "getProgram": {
+      "description": "Return the combined program for a date or period: tasks, appointments, events, reminders and activities.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dateExpression": { "type": "string", "description": "today, tomorrow, Wednesday, 12/09/2026, this month, etc." },
+          "includeCompleted": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "queryActivities": {
+      "description": "MANDATORY for questions about when a completed activity happened, the last time it happened, or activities during a date range. Use this instead of Structured Knowledge, Context Search or OWNER.md. For 'quand est-ce que j'ai nettoyé les toilettes pour la dernière fois ?', use dateExpression 'ce mois-ci' or another relevant past range and object 'toilettes'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dateExpression": { "type": "string" },
+          "action": { "type": "string" },
+          "object": { "type": "string" }
+        },
+        "required": ["dateExpression"],
+        "additionalProperties": false
+      }
+    },
+    "countActivities": {
+      "description": "MANDATORY for exact counts of completed activities. Query Paul's structured journal; never count from conversation text, Context files or OWNER.md.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dateExpression": { "type": "string" },
+          "action": { "type": "string" },
+          "object": { "type": "string" }
+        },
+        "required": ["dateExpression"],
+        "additionalProperties": false
+      }
+    },
+    "recordMood": {
+      "description": "Record Romain's mood or emotional state for a date.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string" },
+          "score": { "type": "number", "minimum": -2, "maximum": 2 },
+          "note": { "type": "string" },
+          "occurredAt": { "type": "string" },
+          "sourceText": { "type": "string" }
+        },
+        "required": ["label"],
+        "additionalProperties": false
+      }
+    },
+    "saveHabit": {
+      "description": "Create or update a personal habit and its optional schedule.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "schedule": { "type": "object" },
+          "active": { "type": "boolean" }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      }
+    },
+    "getContext": {
+      "description": "Return a compact summary of Paul's personal facts, relationships and current context. Use for broad questions such as 'qu'est-ce que tu sais sur moi ?'. Do not use this instead of queryActivities for exact activity/date questions.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  }
+}
