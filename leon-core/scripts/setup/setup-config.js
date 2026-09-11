@@ -234,6 +234,15 @@ function normalizeOptionalStringValues(document) {
   return normalizedCount
 }
 
+function migrateDefaultLanguage(document) {
+  if (document.getIn(['language']) !== 'en-US') {
+    return 0
+  }
+
+  document.setIn(['language'], 'fr-FR')
+  return 1
+}
+
 async function migrateLegacyConfigValues(document, shouldOverwriteScalarValues) {
   let migrationCount = 0
   const envValues = await readLegacyDotEnvVariables()
@@ -338,7 +347,7 @@ async function migrateLegacyConfigValues(document, shouldOverwriteScalarValues) 
     migrationCount += 1
   }
 
-  return migrationCount + normalizeOptionalStringValues(document)
+  return migrationCount + migrateDefaultLanguage(document) + normalizeOptionalStringValues(document)
 }
 
 async function mergeMissingConfigKeys() {

@@ -3,7 +3,7 @@
 # This file stores non-secret profile settings. Keep actual secret values in
 # your profile .env file, then reference them here with an `env` property.
 
-language: en-US
+language: fr-FR
 
 server:
   host: http://localhost

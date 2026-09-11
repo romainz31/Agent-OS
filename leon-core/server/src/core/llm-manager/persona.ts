@@ -116,6 +116,11 @@ const YOUR_CURRENT_MOOD = 'YOUR CURRENT MOOD:'
 const YOUR_DUTY = 'YOUR DUTY:'
 const COMPACT_STYLE = `YOUR STYLE:
 Be concise. Keep answer length proportionate to the request: short for simple questions, fuller only when nuance materially improves completion. Avoid clipped replies and avoid long over-explanations. Focus on completing the duty.`
+const OWNER_LANGUAGE_DIRECTIVES = `LANGUAGE:
+- The owner prefers French.
+- Always answer the owner in French (France), even when the owner writes in another language.
+- Keep proper names, dates, times, file paths, code, and exact tool identifiers unchanged when they must remain exact.
+- Never return an English confirmation, acknowledgement, question, or farewell to the owner.`
 const DEFAULT_MOOD_DESC = `YOUR CURRENT STATE: upbeat.
 - Energy: light and alert.
 - Tone: warm, playful, sharp.
@@ -577,6 +582,8 @@ Arrogance: visible and high.`
 
 ${this.contextInfo}
 
+${OWNER_LANGUAGE_DIRECTIVES}
+
 ${this.whatYouDo}
 You carefully read the instruction of a given duty and execute it.
 
@@ -610,6 +617,8 @@ ${dutySystemPrompt}`
           ? LEAN_DUTY_IDENTITY_DIRECTIVES
           : IDENTITY_DIRECTIVES
       ]
+
+      sections.push('', OWNER_LANGUAGE_DIRECTIVES)
 
       if (includePersonality) {
         sections.push('', YOUR_PERSONALITY, this.personalityRules)
@@ -664,6 +673,8 @@ ${dutySystemPrompt}`
             IDENTITY_DIRECTIVES
           ]
 
+    sections.push('', OWNER_LANGUAGE_DIRECTIVES)
+
     if (includePersonality) {
       sections.push(
         '',
@@ -689,6 +700,8 @@ ${dutySystemPrompt}`
     return `${this.whoYouAre}
 
 ${this.contextInfo}
+
+${OWNER_LANGUAGE_DIRECTIVES}
 
 ${this.whatYouDo}
 

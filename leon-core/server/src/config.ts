@@ -20,7 +20,7 @@ type LLMProviderConfig = LLMProviderConfigSchema
 type OptionalStringConfigValue = LeonConfig['llm']['default']
 
 const DEFAULT_CONFIG: LeonConfig = {
-  language: 'en-US',
+  language: 'fr-FR',
   server: {
     host: 'http://localhost',
     port: 5_366

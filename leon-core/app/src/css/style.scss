@@ -1172,6 +1172,11 @@ main {
   display: none !important;
 }
 
+/* Leon v2 keeps the internal workflow plan out of the conversation as well. */
+.leon-v2 .bubble-container[data-widget-id^='workflow-progress-'] {
+  display: none !important;
+}
+
 .tool-group-container {
   max-width: 82%;
   margin: 5px 6px;
