@@ -641,6 +641,16 @@ function formatPaulValue(value: unknown): string {
   return String(value)
 }
 
+function translatePaulPredicate(predicate: string): string {
+  const translations: Record<string, string> = {
+    'lives in': 'habite à',
+    name: 's’appelle',
+    likes: 'aime',
+    'works at': 'travaille à'
+  }
+  return translations[predicate.toLocaleLowerCase('en-US')] || predicate
+}
+
 function buildPaulFallbackAnswer(executionHistory: ExecutionRecord[]): string {
   const execution = executionHistory.at(-1)
   if (!execution) return 'La mémoire de Paul est disponible.'
@@ -650,7 +660,7 @@ function buildPaulFallbackAnswer(executionHistory: ExecutionRecord[]): string {
   if (functionName === 'saveFact') {
     const fact = output?.['fact'] as Record<string, unknown> | undefined
     if (fact) {
-      return `C'est enregistré dans ma mémoire : ${formatPaulValue(fact['subject'])} ${formatPaulValue(fact['predicate'])} ${formatPaulValue(fact['value'])}.`
+      return `C'est enregistré dans ma mémoire : ${formatPaulValue(fact['subject'])} ${translatePaulPredicate(formatPaulValue(fact['predicate']))} ${formatPaulValue(fact['value'])}.`
     }
     return 'C’est enregistré dans la mémoire de Paul.'
   }
@@ -660,6 +670,9 @@ function buildPaulFallbackAnswer(executionHistory: ExecutionRecord[]): string {
       const subject = formatPaulValue(relationship['subject'])
       const relation = formatPaulValue(relationship['relation'])
       const object = formatPaulValue(relationship['object'])
+      if (relation.toLocaleLowerCase('fr-FR') === 'partner') {
+        return `C’est enregistré : ${subject} et ${object} sont en couple.`
+      }
       return `C’est enregistré : ${subject} — ${relation} — ${object}.`
     }
     return 'La relation est enregistrée dans la mémoire de Paul.'
@@ -674,7 +687,7 @@ function buildPaulFallbackAnswer(executionHistory: ExecutionRecord[]): string {
       ? profile['relationships'] as Array<Record<string, unknown>>
       : []
     const lines = [
-      ...facts.map((fact) => `- ${formatPaulValue(fact['subject'])} ${formatPaulValue(fact['predicate'])} ${formatPaulValue(fact['value'])}.`),
+      ...facts.map((fact) => `- ${formatPaulValue(fact['subject'])} ${translatePaulPredicate(formatPaulValue(fact['predicate']))} ${formatPaulValue(fact['value'])}.`),
       ...relationships.map((relationship) => `- ${formatPaulValue(relationship['subject'])} ${formatPaulValue(relationship['relation'])} ${formatPaulValue(relationship['object'])}.`)
     ].filter((line) => line !== '-  .')
     return lines.length > 0
