@@ -369,6 +369,11 @@ export function findHighConfidenceAgentToolkitId(input: string): string | null {
       getToolkitRoutingLabels(toolkit)
     ])
   )
+
+  if (toolkitLabels.has('personal_assistant') && isLikelyPaulRequest(input)) {
+    return 'personal_assistant'
+  }
+
   const exactMatches = new Set<string>()
 
   for (const [toolkitId, labels] of toolkitLabels) {
@@ -396,6 +401,29 @@ export function findHighConfidenceAgentToolkitId(input: string): string | null {
   return exactMatches.size === 1
     ? exactMatches.values().next().value || null
     : null
+}
+
+function isLikelyPaulRequest(input: string): boolean {
+  const normalized = input
+    .normalize('NFKC')
+    .toLocaleLowerCase('fr-FR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const patterns = [
+    /\b(je m appelle|j habite|j aime|je travaille|ma copine|mon copain|ma relation|chez moi)\b/,
+    /\b(qu est ce que tu sais|ce que tu sais|comment je m appelle|ou est ce que j habite)\b/,
+    /\b(quand|combien|derniere fois|dernier fois|quel jour)\b.*\b(j ai|nettoy|fait|jou|achete|allee|emmen|activit|toilette|machine|fontaine)\b/,
+    /\b(j ai|je viens de|hier|aujourd hui|ce matin|ce soir)\b.*\b(nettoy|fait|jou|achete|allee|emmen|ranger|menage|activit)\b/,
+    /\b(hier|aujourd hui|ce matin|ce soir)\b.*\b(j ai|nettoy|fait|jou|achete|allee|emmen|ranger|menage|activit)\b/,
+    /\b(programme|agenda|rappel|rappelle|tache|taches|rendez vous|evenement|prevu|dois faire)\b/,
+    /\b(humeur|ressenti|senti|habitude|habitudes)\b/
+  ]
+
+  return patterns.some((pattern) => pattern.test(normalized))
 }
 
 /**
@@ -767,6 +795,10 @@ export async function runAgentLoop(
     // the rest of the run instead of allowing the prompt to grow back.
     let isContextRecoveryAttempt = hasUsedContextRecovery
     const remainingIterations = iterationLimit - iteration
+    const isPaulOnlyTurn = isPaulOnlyCatalog(params.catalog)
+    const requiresPaulTool = isPaulOnlyTurn &&
+      executionHistory.length === 0 &&
+      trackedSteps.length === 0
 
     while (true) {
       try {
@@ -775,8 +807,8 @@ export async function runAgentLoop(
           params.catalog.tools,
           {
             isRecoveryAttempt,
-            ...(isPaulOnlyCatalog(params.catalog) ? { isStructuredMemoryTurn: true } : {}),
-            ...(requiresToolAction ? { requiresToolAction: true } : {}),
+            ...(isPaulOnlyTurn ? { isStructuredMemoryTurn: true } : {}),
+            ...(requiresToolAction || requiresPaulTool ? { requiresToolAction: true } : {}),
             ...(isOutputRecoveryAttempt ? { isOutputRecoveryAttempt: true } : {}),
             ...(isContextRecoveryAttempt
               ? { isContextRecoveryAttempt: true }
