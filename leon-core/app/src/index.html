@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" type="image/png" href="/img/favicon.png" />
@@ -299,22 +299,60 @@
     <aside id="sessions-panel" aria-label="Sessions">
       <div id="sessions-header">
         <div>
-          <span id="sessions-eyebrow">Sessions</span>
+          <span id="sessions-eyebrow">Conversations</span>
         </div>
-        <button id="new-session" type="button" aria-label="New session">
+        <button id="new-session" type="button" aria-label="Nouvelle conversation">
           <i class="ri-add-line"></i>
         </button>
       </div>
       <div id="sessions-list"></div>
     </aside>
     <main>
-      <div id="top-container">
-        <div id="mood"></div>
-        <button id="info">Info</button>
-      </div>
+      <header id="leon-v2-header">
+        <div class="leon-v2-heading">
+          <p class="leon-v2-eyebrow">Leon</p>
+          <h1>Bonjour Romain</h1>
+          <p id="leon-v2-date">Aujourd’hui</p>
+        </div>
+        <div class="leon-v2-header-status">
+          <time id="leon-v2-clock">--:--:--</time>
+          <span id="leon-v2-status" class="leon-v2-status leon-v2-status--ready">
+            <span class="leon-v2-status-dot"></span>
+            Leon est prêt
+          </span>
+          <div id="mood" aria-label="Humeur de Leon"></div>
+          <button id="info" type="button">État</button>
+        </div>
+      </header>
+      <section id="leon-v2-overview" aria-label="Vue d’ensemble de Leon">
+        <article class="leon-v2-card leon-v2-today-card">
+          <div class="leon-v2-card-heading">
+            <div>
+              <span class="leon-v2-card-kicker">Aujourd’hui</span>
+              <h2>À faire et à ne pas oublier</h2>
+            </div>
+            <i class="ri-checkbox-circle-line" aria-hidden="true"></i>
+          </div>
+          <div id="leon-v2-today-list" class="leon-v2-empty-state">
+            Aucune tâche prévue pour aujourd’hui.
+          </div>
+        </article>
+        <article class="leon-v2-card leon-v2-week-card">
+          <div class="leon-v2-card-heading">
+            <div>
+              <span class="leon-v2-card-kicker">Les 7 prochains jours</span>
+              <h2>Agenda</h2>
+            </div>
+            <i class="ri-calendar-schedule-line" aria-hidden="true"></i>
+          </div>
+          <div id="leon-v2-week-list" class="leon-v2-week-list">
+            <div class="leon-v2-empty-state">Aucun rendez-vous ou événement prévu.</div>
+          </div>
+        </article>
+      </section>
       <div id="feed">
         <p id="no-bubble" class="hide">
-          You can start to interact with me, don't be shy.
+          Tu peux commencer à discuter avec Leon.
         </p>
       </div>
       <div id="is-typing">
@@ -328,7 +366,7 @@
           <div id="sonar"></div>
         </div>
         <label for="utterance"></label>
-        <textarea id="utterance" autocomplete="off" autofocus></textarea>
+        <textarea id="utterance" autocomplete="off" autofocus placeholder="Écris à Leon…"></textarea>
         <ul id="tip">
           <li><kbd>enter</kbd> to submit.</li>
           <li><kbd>shift</kbd> + <kbd>enter</kbd> for new line.</li>
@@ -341,6 +379,24 @@
         </ul>
       </div>
     </main>
+    <nav id="leon-v2-bottom-nav" aria-label="Outils de Leon">
+      <button type="button" data-leon-panel="settings">
+        <i class="ri-settings-3-line" aria-hidden="true"></i>
+        <span>Paramètres</span>
+      </button>
+      <button type="button" data-leon-panel="memory">
+        <i class="ri-brain-line" aria-hidden="true"></i>
+        <span>Mémoire</span>
+      </button>
+      <button type="button" data-leon-panel="skills">
+        <i class="ri-apps-2-line" aria-hidden="true"></i>
+        <span>Skills</span>
+      </button>
+      <button type="button" data-leon-panel="missions">
+        <i class="ri-list-check-3" aria-hidden="true"></i>
+        <span>Missions</span>
+      </button>
+    </nav>
     <footer id="footer">
       <div id="logo-container">
         <div id="logo"></div>
@@ -361,6 +417,19 @@
         </div>
       </div>
     </footer>
+    <div id="leon-v2-panel-backdrop" class="leon-v2-hidden" aria-hidden="true"></div>
+    <section id="leon-v2-panel" class="leon-v2-hidden" role="dialog" aria-modal="true" aria-labelledby="leon-v2-panel-title">
+      <header class="leon-v2-panel-header">
+        <div>
+          <span class="leon-v2-card-kicker">Leon v2</span>
+          <h2 id="leon-v2-panel-title">Skills</h2>
+        </div>
+        <button id="leon-v2-panel-close" type="button" aria-label="Fermer">
+          <i class="ri-close-line" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div id="leon-v2-panel-content" class="leon-v2-panel-content"></div>
+    </section>
     <script type="module" src="/js/main.js"></script>
   </body>
 </html>

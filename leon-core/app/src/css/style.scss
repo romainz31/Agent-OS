@@ -917,3 +917,495 @@ textarea::-webkit-scrollbar-thumb {
     gap: 8px;
   }
 }
+
+/* -------------------------------------------------------------------------
+ * Leon v2 personal assistant workspace
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --leon-v2-surface: rgba(18, 21, 25, 0.92);
+  --leon-v2-surface-soft: rgba(255, 255, 255, 0.045);
+  --leon-v2-border: rgba(255, 255, 255, 0.1);
+  --leon-v2-muted: rgba(255, 255, 255, 0.52);
+  --leon-v2-accent: #5da8ff;
+  --leon-v2-accent-soft: rgba(93, 168, 255, 0.16);
+  --leon-v2-success: #65d69b;
+}
+
+body {
+  min-width: 920px;
+  background:
+    radial-gradient(circle at 74% 2%, rgba(28, 117, 219, 0.11), transparent 34%),
+    radial-gradient(circle at 86% 94%, rgba(237, 41, 122, 0.07), transparent 30%),
+    var(--black-color);
+}
+
+#sessions-panel {
+  top: 224px;
+  bottom: 82px;
+  border-right-color: var(--leon-v2-border);
+}
+
+#sessions-eyebrow {
+  color: var(--leon-v2-muted);
+  text-transform: none;
+  font-size: 1rem;
+}
+
+main {
+  top: 0;
+  height: 100%;
+}
+
+#leon-v2-header {
+  position: absolute;
+  inset: 18px 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-height: 62px;
+}
+
+.leon-v2-eyebrow,
+.leon-v2-card-kicker {
+  color: var(--leon-v2-accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+#leon-v2-header h1 {
+  margin-top: 2px;
+  font-size: clamp(1.6rem, 2.2vw, 2.1rem);
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+#leon-v2-date {
+  margin-top: 4px;
+  color: var(--leon-v2-muted);
+  font-size: 0.9rem;
+}
+
+.leon-v2-header-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--leon-v2-muted);
+}
+
+#leon-v2-clock {
+  color: var(--white-color);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15rem;
+  letter-spacing: 0.06em;
+}
+
+.leon-v2-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid rgba(101, 214, 155, 0.25);
+  border-radius: 999px;
+  background: rgba(101, 214, 155, 0.08);
+  color: var(--leon-v2-success);
+  font-size: 0.82rem;
+}
+
+.leon-v2-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 10px currentColor;
+}
+
+#mood,
+#info {
+  display: none;
+}
+
+#leon-v2-overview {
+  position: absolute;
+  top: 94px;
+  right: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 14px;
+  height: 112px;
+}
+
+.leon-v2-card {
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--leon-v2-border);
+  border-radius: 15px;
+  background: linear-gradient(135deg, var(--leon-v2-surface), rgba(18, 21, 25, 0.66));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.15);
+}
+
+.leon-v2-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.leon-v2-card-heading h2 {
+  margin-top: 3px;
+  color: var(--white-color);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.leon-v2-card-heading > i {
+  color: var(--leon-v2-accent);
+  font-size: 1.25rem;
+}
+
+.leon-v2-empty-state {
+  margin-top: 12px;
+  color: var(--leon-v2-muted);
+  font-size: 0.88rem;
+}
+
+.leon-v2-week-list {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+#feed {
+  top: 224px;
+  height: calc(100% - 348px);
+  border: 1px solid var(--leon-v2-border);
+  border-radius: 15px;
+  background: rgba(4, 5, 7, 0.35);
+}
+
+#feed .bubble {
+  font-size: 1.08rem;
+  line-height: 1.5rem;
+}
+
+#input-container {
+  bottom: 42px;
+}
+
+#input-container textarea {
+  height: 58px;
+  padding: 14px 46px 12px 16px;
+  border: 1px solid var(--leon-v2-border);
+  border-radius: 13px;
+  background: var(--leon-v2-surface);
+  text-align: left;
+  font-size: 1.05rem;
+  font-weight: 400;
+}
+
+#input-container textarea::placeholder {
+  color: var(--leon-v2-muted);
+}
+
+#tip {
+  display: none;
+}
+
+#mic-container {
+  z-index: 1;
+  right: 14px;
+  margin-top: 17px;
+}
+
+#footer {
+  display: none;
+}
+
+#leon-v2-bottom-nav {
+  position: fixed;
+  right: 4%;
+  bottom: 14px;
+  left: calc(4% + var(--sessions-panel-width));
+  z-index: 6;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+#leon-v2-bottom-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--leon-v2-border);
+  border-radius: 9px;
+  background: rgba(18, 21, 25, 0.88);
+  color: var(--leon-v2-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  pointer-events: auto;
+  transition: border-color 0.18s, background-color 0.18s, color 0.18s;
+}
+
+#leon-v2-bottom-nav button:hover,
+#leon-v2-bottom-nav button:focus-visible {
+  border-color: rgba(93, 168, 255, 0.5);
+  background: var(--leon-v2-accent-soft);
+  color: var(--white-color);
+}
+
+#leon-v2-bottom-nav i {
+  color: var(--leon-v2-accent);
+  font-size: 1rem;
+}
+
+/* Leon v2 keeps internal reasoning and technical tool payloads out of the chat. */
+.reasoning-block-container,
+.tool-content,
+.tool-subtitle,
+.tool-raw-details {
+  display: none !important;
+}
+
+.tool-group-container {
+  max-width: 82%;
+  margin: 5px 6px;
+  border: 1px solid rgba(93, 168, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(93, 168, 255, 0.06);
+}
+
+.tool-header {
+  min-height: 34px;
+  padding: 7px 10px;
+  color: var(--leon-v2-muted);
+  font-size: 0.84rem;
+}
+
+.tool-header .tool-name,
+.tool-header .tool-title {
+  color: var(--leon-v2-muted);
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.tool-header .tool-icon {
+  color: var(--leon-v2-accent);
+}
+
+#leon-v2-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+#leon-v2-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 72px));
+  border: 1px solid var(--leon-v2-border);
+  border-radius: 18px;
+  background: #111419;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+  transform: translate(-50%, -50%);
+}
+
+.leon-v2-hidden {
+  display: none !important;
+}
+
+.leon-v2-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--leon-v2-border);
+}
+
+.leon-v2-panel-header h2 {
+  margin-top: 3px;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+#leon-v2-panel-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: var(--leon-v2-muted);
+  cursor: pointer;
+  font-size: 1.3rem;
+}
+
+#leon-v2-panel-close:hover {
+  background: var(--leon-v2-surface-soft);
+  color: var(--white-color);
+}
+
+.leon-v2-panel-content {
+  padding: 16px 22px 22px;
+  overflow: auto;
+}
+
+.leon-v2-panel-intro {
+  margin-bottom: 14px;
+  color: var(--leon-v2-muted);
+  line-height: 1.45;
+}
+
+.leon-v2-skill-toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.leon-v2-skill-toolbar input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--leon-v2-border);
+  border-radius: 9px;
+  outline: none;
+  color: var(--white-color);
+  background: var(--leon-v2-surface-soft);
+}
+
+.leon-v2-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.leon-v2-skill-card {
+  padding: 14px;
+  border: 1px solid var(--leon-v2-border);
+  border-radius: 12px;
+  background: var(--leon-v2-surface-soft);
+}
+
+.leon-v2-skill-card.is-disabled {
+  opacity: 0.58;
+}
+
+.leon-v2-skill-card-heading,
+.leon-v2-skill-card-meta,
+.leon-v2-skill-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.leon-v2-skill-card-heading {
+  align-items: flex-start;
+}
+
+.leon-v2-skill-name {
+  font-weight: 600;
+}
+
+.leon-v2-skill-description {
+  min-height: 40px;
+  margin-top: 8px;
+  color: var(--leon-v2-muted);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.leon-v2-skill-card-meta {
+  justify-content: flex-start;
+  margin-top: 12px;
+  color: var(--leon-v2-muted);
+  font-size: 0.75rem;
+}
+
+.leon-v2-skill-card-actions {
+  margin-top: 12px;
+}
+
+.leon-v2-skill-toggle,
+.leon-v2-skill-details {
+  padding: 6px 9px;
+  border: 1px solid var(--leon-v2-border);
+  border-radius: 7px;
+  color: var(--leon-v2-muted);
+  cursor: pointer;
+  font-size: 0.77rem;
+}
+
+.leon-v2-skill-toggle:hover,
+.leon-v2-skill-details:hover {
+  border-color: rgba(93, 168, 255, 0.5);
+  color: var(--white-color);
+}
+
+.leon-v2-skill-actions {
+  display: none;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--leon-v2-border);
+  color: var(--leon-v2-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.leon-v2-skill-card.is-expanded .leon-v2-skill-actions {
+  display: block;
+}
+
+.leon-v2-empty-panel {
+  padding: 28px 12px;
+  color: var(--leon-v2-muted);
+  text-align: center;
+}
+
+@media (max-width: 940px) {
+  body {
+    min-width: 0;
+  }
+
+  #sessions-panel {
+    top: 188px;
+    height: 138px;
+  }
+
+  main {
+    top: 158px;
+    height: calc(100% - 158px);
+  }
+
+  #leon-v2-header {
+    top: 10px;
+  }
+
+  #leon-v2-overview {
+    top: 80px;
+    height: 96px;
+  }
+
+  #feed {
+    top: 190px;
+    height: calc(100% - 294px);
+  }
+
+  #leon-v2-bottom-nav {
+    right: 4%;
+    left: 4%;
+  }
+
+  .leon-v2-skill-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -57,7 +57,7 @@ export default class ToolUIHandler {
     }
 
     if (toolGroupContainer.mode === 'activity_card') {
-      this.updateActivityCard(toolGroupContainer, data, answerKey)
+      this.updateActivityCard(toolGroupContainer, data)
     } else {
       this.addLegacyToolMessage(toolGroupContainer, answer)
     }
@@ -123,12 +123,7 @@ export default class ToolUIHandler {
   /**
    * Create the legacy shell-like tool group container.
    */
-  createLegacyToolGroupContainer({
-    groupId,
-    toolkitName,
-    toolName,
-    answerKey
-  }) {
+  createLegacyToolGroupContainer({ groupId }) {
     const groupContainer = document.createElement('div')
     groupContainer.className = 'tool-group-container'
     groupContainer.setAttribute('data-tool-group-id', groupId)
@@ -137,8 +132,8 @@ export default class ToolUIHandler {
     toolHeader.className = 'tool-header'
     toolHeader.setAttribute('type', 'button')
     toolHeader.innerHTML = `
-      <i class="ri-terminal-line tool-icon"></i>
-      <span class="tool-name">${toolkitName} toolkit → ${toolName} → ${answerKey}</span>
+      <i class="ri-loader-4-line tool-icon"></i>
+      <span class="tool-name">Leon traite ta demande…</span>
       <i class="ri-arrow-down-s-line expand-icon"></i>
     `
 
@@ -169,7 +164,6 @@ export default class ToolUIHandler {
     groupId,
     toolkitName,
     toolName,
-    answerKey,
     data
   }) {
     const groupContainer = document.createElement('div')
@@ -191,10 +185,7 @@ export default class ToolUIHandler {
 
     const title = document.createElement('span')
     title.className = 'tool-title'
-    title.textContent =
-      data.toolCallTitle ||
-      data.stepLabel ||
-      this.humanizeFunctionName(answerKey)
+    title.textContent = 'Leon traite ta demande…'
 
     const subtitle = document.createElement('span')
     subtitle.className = 'tool-subtitle'
@@ -210,7 +201,7 @@ export default class ToolUIHandler {
 
     const statusChip = document.createElement('span')
     statusChip.className = 'tool-status-chip running'
-    statusChip.textContent = 'Running'
+    statusChip.textContent = 'En cours'
 
     const expandIcon = document.createElement('i')
     expandIcon.className = 'ri-arrow-down-s-line expand-icon'
@@ -225,7 +216,7 @@ export default class ToolUIHandler {
 
     const summary = document.createElement('div')
     summary.className = 'tool-activity-summary'
-    summary.textContent = 'Preparing tool activity...'
+    summary.textContent = 'Leon exécute une action…'
 
     const sections = document.createElement('div')
     sections.className = 'tool-activity-sections'
@@ -290,8 +281,7 @@ export default class ToolUIHandler {
       'tool-group-container tool-activity-card agent-skill-activity-card'
     groupContainer.setAttribute('data-tool-group-id', groupId)
 
-    const skillName = agentSkill.name || agentSkill.id || 'Agent Skill'
-    const skillPath = agentSkill.skillPath || 'SKILL.md'
+    const skillPath = agentSkill.skillPath || 'Instructions locales'
 
     const toolHeader = document.createElement('button')
     toolHeader.className = 'tool-header tool-activity-header'
@@ -308,7 +298,7 @@ export default class ToolUIHandler {
 
     const title = document.createElement('span')
     title.className = 'tool-title'
-    title.textContent = `Agent Skill: ${skillName}`
+    title.textContent = 'Leon suit une compétence…'
 
     const subtitle = document.createElement('span')
     subtitle.className = 'tool-subtitle'
@@ -325,7 +315,7 @@ export default class ToolUIHandler {
 
     const statusChip = document.createElement('span')
     statusChip.className = 'tool-status-chip selected'
-    statusChip.textContent = 'In use'
+    statusChip.textContent = 'Actif'
 
     const expandIcon = document.createElement('i')
     expandIcon.className = 'ri-arrow-down-s-line expand-icon'
@@ -340,14 +330,14 @@ export default class ToolUIHandler {
 
     const summary = document.createElement('div')
     summary.className = 'tool-activity-summary'
-    summary.textContent = 'Following SKILL.md instructions for this step.'
+    summary.textContent = 'Leon suit les instructions de cette compétence.'
 
     const sections = document.createElement('div')
     sections.className = 'tool-activity-sections single'
 
     const skillPanel = this.createActivityPanel(
       'Skill',
-      'Agent Skill context for this step'
+      'Compétence utilisée pour cette étape'
     )
     sections.appendChild(skillPanel.panel)
 
@@ -423,11 +413,8 @@ export default class ToolUIHandler {
   /**
    * Update the activity card with the latest input/output state.
    */
-  updateActivityCard(toolGroupContainer, data, answerKey) {
-    const title =
-      data.toolCallTitle ||
-      data.stepLabel ||
-      this.humanizeFunctionName(data.functionName || answerKey)
+  updateActivityCard(toolGroupContainer, data) {
+    const title = 'Leon traite ta demande…'
     toolGroupContainer.title.textContent = title
 
     if (data.functionName) {
@@ -439,8 +426,8 @@ export default class ToolUIHandler {
     if (data.toolPhase === 'input') {
       toolGroupContainer.summary.textContent =
         data.stepLabel || data.functionName
-          ? `Preparing ${title.toLowerCase()}...`
-          : 'Preparing tool activity...'
+          ? 'Leon prépare cette action…'
+          : 'Leon exécute une action…'
       this.setStatusChip(toolGroupContainer.statusChip, 'running')
 
       const parsedInput = this.parseToolInput(data.toolInput)
@@ -481,7 +468,7 @@ export default class ToolUIHandler {
       this.setStatusChip(toolGroupContainer.statusChip, 'running')
 
       if (outputDelta) {
-        toolGroupContainer.summary.textContent = 'Receiving command output...'
+        toolGroupContainer.summary.textContent = 'Leon reçoit le résultat…'
         toolGroupContainer.commandOutputText = this.mergeCommandOutput(
           toolGroupContainer.commandOutputText,
           outputDelta
@@ -502,10 +489,10 @@ export default class ToolUIHandler {
       toolGroupContainer.summary.textContent =
         data.message ||
         (isError
-          ? 'The function failed.'
+          ? 'Leon n’a pas pu terminer cette action.'
           : isObserved
-            ? 'The function returned an observation.'
-            : 'The function completed.')
+            ? 'Leon a obtenu le résultat demandé.'
+            : 'Leon a terminé cette action.')
       this.setStatusChip(
         toolGroupContainer.statusChip,
         isError ? 'error' : isObserved ? 'observed' : 'success'
@@ -528,14 +515,14 @@ export default class ToolUIHandler {
 
   updateAgentSkillActivityCard(activityContainer, data) {
     const agentSkill = data.agentSkill || {}
-    const skillName = agentSkill.name || agentSkill.id || 'Agent Skill'
+    const skillName = agentSkill.name || agentSkill.id || 'compétence'
     const skillPath = agentSkill.skillPath || ''
 
-    activityContainer.title.textContent = `Agent Skill: ${skillName}`
-    activityContainer.subtitle.textContent = skillPath || 'SKILL.md'
+    activityContainer.title.textContent = 'Leon suit une compétence…'
+    activityContainer.subtitle.textContent = skillPath || 'Instructions locales'
     activityContainer.subtitle.setAttribute(
       'title',
-      skillPath || 'SKILL.md'
+      skillPath || 'Instructions locales'
     )
     this.setStatusChip(activityContainer.statusChip, 'selected')
     this.renderValuePreview(
@@ -546,7 +533,7 @@ export default class ToolUIHandler {
         root_path: agentSkill.rootPath || '',
         skill_path: skillPath
       },
-      'No Agent Skill metadata'
+      'Aucune information complémentaire.'
     )
 
     if (activityContainer.isNew) {
@@ -877,30 +864,30 @@ export default class ToolUIHandler {
 
     if (status === 'error') {
       chip.classList.add('error')
-      chip.textContent = 'Failed'
+      chip.textContent = 'Échec'
       return
     }
 
     if (status === 'success') {
       chip.classList.add('success')
-      chip.textContent = 'Done'
+      chip.textContent = 'Terminé'
       return
     }
 
     if (status === 'selected') {
       chip.classList.add('selected')
-      chip.textContent = 'In use'
+      chip.textContent = 'Actif'
       return
     }
 
     if (status === 'observed') {
       chip.classList.add('observed')
-      chip.textContent = 'Observed'
+      chip.textContent = 'Observé'
       return
     }
 
     chip.classList.add('running')
-    chip.textContent = 'Running'
+    chip.textContent = 'En cours'
   }
 
   /**

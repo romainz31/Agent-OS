@@ -12,6 +12,7 @@ import { ensureProfileAuthentication } from './profile-auth'
 // import Recorder from './recorder'
 // import listener from './listener'
 import { onkeydownstartrecording, onkeydowninput } from './onkeydown'
+import { initLeonV2Dashboard } from './leon-v2-dashboard'
 
 const config = {
   app: 'webapp',
@@ -74,6 +75,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // let chunks = []
 
     window.leonConfigInfo = response.data
+    await initLeonV2Dashboard({
+      serverUrl,
+      timeZone: response.data.timeZone || 'Europe/Paris'
+    })
     const infoKeys = [
       'timeZone',
       'telemetry',
