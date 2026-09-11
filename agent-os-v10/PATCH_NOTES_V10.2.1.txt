@@ -1,9 +1,0 @@
-Agent-OS V10.2.1 — Windows SQLite + lancement simplifié
-
-Corrections :
-- fermeture déterministe des connexions SQLite utilisées avec `with`;
-- évite les WinError 32 sur agenda.db et document_index.sqlite3 pendant les tests;
-- ajoute reportlab aux dépendances documentaires pour le test PDF;
-- ajoute start_v10.cmd : double-clic ou .\start_v10.cmd, sans activer manuellement le venv;
-- ajoute venv.cmd : ouvre un terminal avec .venv activé pour pouvoir taper `python ...`;
-- aucun fichier data/ ni workspace/ dans le patch.

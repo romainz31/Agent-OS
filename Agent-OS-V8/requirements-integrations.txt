@@ -1,5 +1,0 @@
-langgraph==1.2.11
-langgraph-checkpoint-sqlite==3.1.1
-agent-framework-core==1.17.0
-agent-framework-orchestrations==1.1.1
-agent-framework-ollama==1.0.0b260813

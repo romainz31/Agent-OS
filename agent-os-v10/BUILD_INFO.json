@@ -1,9 +1,0 @@
-{
-  "name": "Agent-OS",
-  "version": "10.2.1",
-  "built_at": "2026-09-11",
-  "upgrade_from": "10.2.0",
-  "feature": "Windows SQLite close fix and simple venv launcher",
-  "data_migration": "none",
-  "data_overwrite": false
-}

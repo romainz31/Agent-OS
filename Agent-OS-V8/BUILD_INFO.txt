@@ -1,7 +1,0 @@
-Agent-OS V8.0.0
-Build: 2026-09-10
-Architecture: Option C / Hybrid Integration Kernel
-Baseline: latest committed Agent-OS V6 + clean V8 integration layer
-Initial state: memory=0, agenda=0, missions=0, conversation=0
-Local verification: compileall OK; tests.test_v8 OK (25 checks)
-External engines: adapters prepared for Agent Zero, LangGraph, Microsoft Agent Framework and OpenHands.
