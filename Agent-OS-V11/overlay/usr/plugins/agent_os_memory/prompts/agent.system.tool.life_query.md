@@ -1,26 +1,40 @@
-## `life_query` — rappel personnel, agenda et journal
+### life_query
 
-Pour toute question personnelle sur ce que l'utilisateur a prévu, fait,
-ressenti, préféré ou dit à propos d'une personne, interroge cet outil AVANT le
-Web et avant la mémoire vectorielle générale.
+Interroge la mémoire personnelle structurée avant toute recherche Web ou toute
+réponse fondée sur un souvenir vague.
 
 Arguments JSON :
-- `text` : sujet recherché
-- `kinds` : liste parmi les types de `life_capture`
-- `statuses` : filtre d'état
-- `start`, `end` : bornes ISO inclusives
-- `subject`, `predicate` : filtres de faits
-- `entity`, `entity_type` : personne, lieu ou projet relié ; permet de répondre
-  précisément à « avec qui ? » et « où ? »
-- `current_facts_only` : vrai par défaut
-- `aggregate` : `list` ou `count`
-- `follow_up=true` quand la demande complète la question précédente, par
-  exemple « et le 12/09/2026 ? » ; les nouveaux filtres remplacent les anciens
-- `limit` : 1 à 100
 
-Si `found=0`, dis simplement que tu n'as pas cette information et pose une
-question utile. `web_needed=false` signifie qu'une recherche Web ne doit pas
-être lancée pour combler ce vide personnel.
+- `text` : sujet ou action recherchée ;
+- `kinds` : types parmi ceux de `life_capture` ;
+- `statuses` : par exemple `pending` ou `done` ;
+- `start`, `end` : bornes ISO inclusives ;
+- `task_bucket` : `daily` ou `backlog` ;
+- `subject`, `predicate` : filtres de faits et préférences ;
+- `entity`, `entity_type` : personne, lieu, animal ou projet ;
+- `current_facts_only` : `true` par défaut ;
+- `aggregate` : `list` ou `count` ;
+- `include_details` : `true` pour retrouver les messages sources et détails ;
+- `follow_up=true` quand la question complète la précédente, par exemple
+  « et le 12/09/2026 ? » ;
+- `limit` : de 1 à 100.
 
-Réponds ensuite naturellement. Ne récite pas les noms de tables, les JSON ou
-les identifiants sauf si l'utilisateur demande un diagnostic.
+Cas importants :
+
+- « Combien de fois ai-je nettoyé la cuisine ce mois-ci ? » : utilise
+  `kinds=["action"]`, la période du mois, `aggregate=count`. Lis le champ
+  `count` ou `activity_count`, qui additionne les occurrences réelles, et non
+  seulement `records`.
+- « Qu'ai-je fait cette semaine ? » : utilise `kinds=["action"]` et la
+  période demandée ; les `activities` contiennent chaque détail source.
+- « Quelles sont mes tâches générales ? » : utilise
+  `kinds=["task"]`, `statuses=["pending"]`, `task_bucket="backlog"`.
+- « Qu'ai-je prévu pour demain ? » : utilise `kinds=["task"]`, la date de
+  demain, puis distingue les tâches `daily` du backlog général.
+
+Le résultat est local. Si `found=0`, dis simplement que tu ne possèdes pas
+encore cette information et pose une question utile ; ne lance pas le Web pour
+inventer une réponse personnelle.
+
+Réponds ensuite naturellement en français, sans réciter les tables, JSON ou
+identifiants.

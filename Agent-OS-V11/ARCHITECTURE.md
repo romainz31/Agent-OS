@@ -4,10 +4,11 @@
 
 | Domaine | Source de vérité |
 | --- | --- |
-| Tâches et leur état | `records`, type `task` |
+| Tâches et leur état | `records`, type `task`, `task_bucket=daily|backlog` |
 | Rendez-vous | `records`, type `appointment` |
 | Événements personnels | `records`, type `event` |
-| Actions accomplies | `records`, type `action`, ou tâche passée à `done` |
+| Déclarations et détails originaux | `record_observations` |
+| Actions accomplies | `record_observations`, type `action|completion` |
 | Humeurs et ressentis | `records`, type `mood` |
 | Faits, préférences, relations | `facts`, avec versions |
 | Personnes, lieux, projets | `entities` et `record_entities` |
@@ -21,15 +22,20 @@
 2. Un fait actuel contradictoire clôt l'ancienne version ; il ne crée pas deux
    vérités actives.
 3. Répéter le même fait renforce son compteur d'occurrences.
-4. Terminer une tâche met à jour la tâche existante. Cela ne crée pas un second
-   événement « journal ».
-5. Seules les tâches explicitement datées et en retard peuvent être reportées.
-6. Un rendez-vous ou un événement n'est jamais reporté automatiquement.
-7. Toute écriture conserve le texte source, la confiance et une trace d'audit.
-8. Une relance réutilise les filtres du dernier résultat du même chat, pas ceux
+4. Chaque déclaration utilisateur conserve une observation séparée, même si la
+   ligne logique est renforcée ou réutilisée.
+5. Terminer une tâche met à jour la tâche existante et ajoute une observation de
+   réalisation ; elle peut donc être comptée sans créer une fausse deuxième
+   tâche.
+6. Seules les tâches explicitement datées et en retard peuvent être reportées.
+7. Un rendez-vous ou un événement n'est jamais reporté automatiquement.
+8. Toute écriture conserve le texte source, la confiance et une trace d'audit.
+9. Une relance réutilise les filtres du dernier résultat du même chat, pas ceux
    d'une autre conversation.
-9. Une recherche personnelle vide reste locale et signale l'absence de donnée.
-10. Les inférences sont marquées et ne remplacent jamais un fait explicite.
+10. Une recherche personnelle vide reste locale et signale l'absence de donnée.
+11. Les inférences sont marquées et ne remplacent jamais un fait explicite.
+12. Une tâche en retard passe au backlog général et conserve sa date d'origine,
+    son nombre de reports et son audit.
 
 ## Flux de décision
 

@@ -38,6 +38,42 @@ class PersonalMemoryStoreTests(unittest.TestCase):
         self.assertEqual(second["operation"], "reinforced")
         self.assertEqual(len(result["records"]), 1)
         self.assertEqual(result["records"][0]["occurrences"], 2)
+        self.assertEqual(len(result["records"][0]["observations"]), 2)
+
+    def test_action_count_uses_every_observation_and_keeps_details(self):
+        self.store.capture(
+            kind="action",
+            title="nettoyé la cuisine",
+            source_text="J'ai nettoyé la cuisine, notamment l'évier.",
+            metadata={"piece": "cuisine", "detail": "évier"},
+        )
+        self.current = self.current.replace(day=11)
+        self.store.capture(
+            kind="action",
+            title="nettoyé la cuisine",
+            source_text="J'ai aussi nettoyé la cuisine et la table.",
+            metadata={"piece": "cuisine", "detail": "table"},
+        )
+        result = self.store.query(
+            text="nettoyé la cuisine",
+            kinds=["action"],
+            start="2026-09-01",
+            end="2026-09-30",
+            aggregate="count",
+        )
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["activity_count"], 2)
+        self.assertEqual(
+            {item["source_text"] for item in result["activities"]},
+            {
+                "J'ai nettoyé la cuisine, notamment l'évier.",
+                "J'ai aussi nettoyé la cuisine et la table.",
+            },
+        )
+        self.assertEqual(
+            {item["metadata"]["detail"] for item in result["activities"]},
+            {"évier", "table"},
+        )
 
     def test_completed_task_is_the_only_completed_record(self):
         task = self.store.capture(
@@ -72,6 +108,53 @@ class PersonalMemoryStoreTests(unittest.TestCase):
         self.assertEqual([item["value"] for item in current["facts"]], ["direct"])
         self.assertEqual(len(all_versions["facts"]), 2)
         self.assertEqual(new["fact"]["supersedes_fact_id"], old["fact"]["id"])
+
+    def test_personal_event_and_preference_are_retrievable(self):
+        sea = self.store.capture(
+            kind="event",
+            title="aller à la mer",
+            start_at="2026-12-12",
+            date_precision="day",
+            time_expression="le 12/12/26",
+            source_text="Je dois aller à la mer le 12/12/26",
+        )
+        self.store.capture(
+            kind="preference",
+            title="j'aime le bleu",
+            subject="user",
+            predicate="couleur préférée",
+            value="bleu",
+            source_text="J'aime le bleu",
+        )
+        event = self.store.query(
+            kinds=["event"], start="2026-12-12", end="2026-12-12"
+        )
+        preference = self.store.query(
+            kinds=["preference"], text="bleu", current_facts_only=True
+        )
+        self.assertEqual(event["records"][0]["id"], sea["record"]["id"])
+        self.assertEqual(event["records"][0]["date_precision"], "day")
+        self.assertEqual(preference["facts"][0]["value"], "bleu")
+
+    def test_common_french_dates_are_resolved_after_extraction(self):
+        tomorrow = self.store.capture(
+            kind="task",
+            title="ranger la chambre",
+            due_at="demain",
+            date_precision="day",
+            time_expression="demain",
+            source_text="Demain il faut que je range la chambre",
+        )
+        sea = self.store.capture(
+            kind="event",
+            title="aller à la mer",
+            start_at="12/12/26",
+            date_precision="day",
+            time_expression="12/12/26",
+            source_text="Je dois aller à la mer le 12/12/26",
+        )
+        self.assertTrue(tomorrow["record"]["due_at"].startswith("2026-09-11"))
+        self.assertTrue(sea["record"]["start_at"].startswith("2026-12-12"))
 
     def test_follow_up_changes_date_but_keeps_previous_intent(self):
         self.store.capture(
@@ -134,7 +217,36 @@ class PersonalMemoryStoreTests(unittest.TestCase):
         result = self.store.rollover(target_date="2026-09-10")
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["moved"][0]["id"], dated["record"]["id"])
-        self.assertTrue(result["moved"][0]["due_at"].startswith("2026-09-10"))
+        self.assertIsNone(result["moved"][0]["due_at"])
+        self.assertEqual(result["moved"][0]["task_bucket"], "backlog")
+        self.assertEqual(
+            result["moved"][0]["metadata"]["original_due_at"][:10],
+            "2026-09-09",
+        )
+
+    def test_undated_task_goes_to_general_backlog(self):
+        created = self.store.capture(
+            kind="task",
+            title="ranger la chambre",
+            source_text="Demain il faut que je range la chambre",
+        )
+        self.assertEqual(created["record"]["task_bucket"], "backlog")
+        backlog = self.store.query(kinds=["task"], task_bucket="backlog")
+        self.assertEqual(backlog["records"][0]["title"], "ranger la chambre")
+
+    def test_dated_task_is_in_daily_bucket_until_completed_or_rolled_over(self):
+        created = self.store.capture(
+            kind="task",
+            title="ranger la chambre",
+            due_at="2026-09-12",
+            date_precision="day",
+            source_text="Samedi il faut que je range la chambre",
+        )
+        self.assertEqual(created["record"]["task_bucket"], "daily")
+        daily = self.store.query(
+            kinds=["task"], start="2026-09-12", end="2026-09-12"
+        )
+        self.assertEqual(daily["records"][0]["id"], created["record"]["id"])
 
     def test_ambiguous_update_requires_user_choice(self):
         self.store.capture(kind="task", title="nettoyer filtre aquarium", source_text="À faire")

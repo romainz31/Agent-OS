@@ -1,4 +1,4 @@
-# Agent-OS V11 — Paul sur Agent Zero
+# Agent-OS V11.1 — Paul sur Agent Zero
 
 V11 repart d'Agent Zero pour le runtime d'agents, les outils, les projets, la
 mémoire vectorielle générale et Telegram. La mémoire personnelle de Paul est un
@@ -11,9 +11,22 @@ plugin séparé et structuré : `agent_os_memory`.
   solutions et conventions de projet.
 - `agent_os_memory` est la source de vérité pour la vie personnelle : tâches,
   rendez-vous, événements, actions accomplies, ressentis, relations,
-  préférences et faits personnels.
+  préférences et faits personnels. Chaque déclaration utilisateur conserve son
+  texte source et ses détails ; le stockage ne compresse plus les occurrences
+  en une seule ligne.
 - Une information personnelle est recherchée localement avant toute recherche
   Web. Une donnée absente doit provoquer une question, jamais une invention.
+
+## Règle de planification
+
+Une tâche datée apparaît dans la liste du jour concerné. Si elle n'est pas
+terminée après son échéance, le passage quotidien la déplace dans le backlog
+général en conservant sa date d'origine et son historique. Les rendez-vous et
+événements ne sont jamais déplacés automatiquement.
+
+Les actions réalisées sont enregistrées comme des occurrences indépendantes.
+Paul peut donc répondre à « combien de fois ai-je nettoyé la cuisine ce mois-ci
+? » sans confondre le nombre de lignes de mémoire avec le nombre d'actions.
 
 ## Installation Windows
 

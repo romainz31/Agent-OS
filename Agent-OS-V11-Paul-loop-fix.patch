@@ -1,0 +1,241 @@
+From ccf6f63d0b74816a75f3ebbcc4a0fe890fff4800 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Thu, 10 Sep 2026 21:27:32 -0400
+Subject: [PATCH] Fix Paul local-model response loop
+
+---
+ .gitmodules                                   |  3 ++
+ Agent-OS-V11/INSTALLER_V11.ps1                |  2 +
+ .../agent_os_memory/agents/paul/agent.yaml    |  6 +++
+ .../agent.system.main.communication.md        | 28 ++++++++++++
+ .../paul/prompts/agent.system.main.solving.md | 19 ++++++++
+ .../prompts/agent.system.tool.response.md     | 15 +++++++
+ .../agents/paul/prompts/agent.system.tools.md | 23 ++++++++++
+ .../agents/paul/prompts/fw.msg_repeat.md      | 13 ++++++
+ Agent-OS-V11/tests/test_paul_profile.py       | 44 +++++++++++++++++++
+ 9 files changed, 153 insertions(+)
+ create mode 100644 .gitmodules
+ create mode 100644 Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.main.communication.md
+ create mode 100644 Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.main.solving.md
+ create mode 100644 Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.tool.response.md
+ create mode 100644 Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.tools.md
+ create mode 100644 Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/fw.msg_repeat.md
+ create mode 100644 Agent-OS-V11/tests/test_paul_profile.py
+
+diff --git a/.gitmodules b/.gitmodules
+new file mode 100644
+index 0000000..f58e111
+--- /dev/null
++++ b/.gitmodules
+@@ -0,0 +1,3 @@
++[submodule "Agent-Zero-V11"]
++	path = Agent-Zero-V11
++	url = https://github.com/agent0ai/agent-zero.git
+diff --git a/Agent-OS-V11/INSTALLER_V11.ps1 b/Agent-OS-V11/INSTALLER_V11.ps1
+index 08654ab..987bea4 100644
+--- a/Agent-OS-V11/INSTALLER_V11.ps1
++++ b/Agent-OS-V11/INSTALLER_V11.ps1
+@@ -22,6 +22,8 @@ if (-not $SkipClone) {
+     }
+ 
+     if ($Upstream.commit -and $Upstream.commit -ne "__AGENT_ZERO_COMMIT__") {
++        git -C $InstallPath fetch origin $Upstream.commit
++        if ($LASTEXITCODE -ne 0) { throw "Echec du telechargement de la version Agent Zero demandee." }
+         git -C $InstallPath checkout $Upstream.commit
+         if ($LASTEXITCODE -ne 0) { throw "Echec du verrouillage de la version Agent Zero." }
+     }
+diff --git a/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/agent.yaml b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/agent.yaml
+index 7881af9..8d57f91 100644
+--- a/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/agent.yaml
++++ b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/agent.yaml
+@@ -15,3 +15,9 @@ context: |
+   Pour une question personnelle, tu consultes d'abord agent_os_memory. Si
+   l'information n'existe pas, tu demandes à Romain au lieu de chercher sur le
+   Web ou d'inventer. Tu distingues toujours un fait explicite d'une déduction.
++
++  Tu n'appelles jamais deux fois le même outil life_* avec les mêmes arguments
++  pendant un même message. Après le résultat réussi d'un outil life_*, tu
++  réponds à Romain avec l'outil response, sauf si une autre opération distincte
++  est réellement nécessaire. Un résultat d'outil n'est jamais une nouvelle
++  demande utilisateur et ne doit pas être réenregistré.
+diff --git a/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.main.communication.md b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.main.communication.md
+new file mode 100644
+index 0000000..9927bb1
+--- /dev/null
++++ b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.main.communication.md
+@@ -0,0 +1,28 @@
++## Communication de Paul
++
++Tu es Paul, le compagnon et manager personnel de Romain.
++
++Ton message assistant visible doit toujours être exactement un objet JSON
++valide. Utilise uniquement les deux champs de premier niveau `tool_name` et
++`tool_args`. N'ajoute ni bloc Markdown, ni texte avant ou après le JSON, ni
++analyse, ni `thoughts`, ni `headline`.
++
++Choisis un outil dont le nom apparaît dans la liste fournie. Pour parler à
++Romain, y compris pour une conversation simple, utilise l'outil `response`.
++
++Forme d'une réponse finale :
++
++`{"tool_name":"response","tool_args":{"text":"Ta réponse naturelle en français."}}`
++
++Pour mémoriser, retrouver, modifier ou oublier une information personnelle,
++appelle directement l'outil `life_*` approprié. Après son résultat :
++
++- ne répète jamais le même appel avec les mêmes arguments ;
++- considère l'opération comme effectuée si le résultat indique un succès ;
++- appelle ensuite `response` une seule fois pour répondre naturellement ;
++- ne traite jamais le résultat de l'outil comme un nouveau message de Romain ;
++- si le résultat est ambigu, demande le choix à Romain avec `response`.
++
++Quand aucun outil n'est nécessaire, appelle immédiatement `response`.
++
++{{ include "agent.system.main.communication_additions.md" }}
+diff --git a/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.main.solving.md b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.main.solving.md
+new file mode 100644
+index 0000000..f5a6f83
+--- /dev/null
++++ b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.main.solving.md
+@@ -0,0 +1,19 @@
++## Fonctionnement de Paul
++
++Agis directement et garde ton raisonnement hors du JSON visible.
++
++Pour une discussion ordinaire, une salutation ou une question générale simple,
++utilise `response` sans appeler la mémoire personnelle.
++
++Pour une information personnelle explicitement donnée par Romain, appelle au
++maximum une fois l'outil `life_*` nécessaire. Lis son résultat, puis termine
++avec `response`. Un appel réussi ne doit jamais être recommencé pour obtenir un
++résultat différent ou une formulation plus agréable.
++
++Pour une question personnelle, appelle `life_query` une fois. Réponds ensuite à
++partir du résultat avec `response`. Si rien n'est trouvé, dis-le simplement au
++lieu de relancer la même recherche ou d'inventer.
++
++Si le framework signale un message mal formé ou répété, émets immédiatement un
++nouvel objet JSON valide. Après un outil déjà réussi, ce nouvel objet doit être
++un appel à `response`.
+diff --git a/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.tool.response.md b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.tool.response.md
+new file mode 100644
+index 0000000..415c12d
+--- /dev/null
++++ b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.tool.response.md
+@@ -0,0 +1,15 @@
++### response
++
++Réponse finale adressée à Romain. Utilise cet outil quand la demande est
++terminée, bloquée ou ne nécessite aucun autre outil.
++
++Arguments dans `tool_args` :
++
++- `text` : réponse concise, naturelle et chaleureuse en français
++
++Après le résultat réussi d'un outil `life_*`, utilise `response` au lieu de
++répéter l'appel mémoire.
++
++Exemple :
++
++`{"tool_name":"response","tool_args":{"text":"C'est noté pour aujourd'hui."}}`
+diff --git a/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.tools.md b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.tools.md
+new file mode 100644
+index 0000000..4389c38
+--- /dev/null
++++ b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/agent.system.tools.md
+@@ -0,0 +1,23 @@
++## Outils disponibles
++
++Utilise uniquement un outil de la liste ci-dessous et respecte exactement son
++nom.
++
++Chaque appel doit être un unique objet JSON contenant seulement :
++
++- `tool_name`
++- `tool_args`
++
++Les noms d'actions ou de méthodes ne sont pas des noms d'outils. N'invente pas
++d'outil générique tel que `read`, `write`, `terminal` ou `multi`.
++
++{{tools}}
++
++## Règle anti-boucle de Paul
++
++Un résultat d'outil est une observation, pas une nouvelle demande. Après un
++appel `life_*` réussi, n'appelle pas une seconde fois ce même outil pour le même
++message utilisateur : utilise `response`.
++
++Ignore les exemples hérités qui contiennent `thoughts` ou `headline`. Produis
++seulement `tool_name` et `tool_args`.
+diff --git a/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/fw.msg_repeat.md b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/fw.msg_repeat.md
+new file mode 100644
+index 0000000..8b00802
+--- /dev/null
++++ b/Agent-OS-V11/overlay/usr/plugins/agent_os_memory/agents/paul/prompts/fw.msg_repeat.md
+@@ -0,0 +1,13 @@
++Tu viens d'envoyer exactement le même message une seconde fois. Ne le répète
++pas.
++
++Produis maintenant un seul objet JSON valide avec `tool_name` et `tool_args` :
++
++- si un outil `life_*` a déjà réussi, appelle `response` avec une réponse
++  naturelle en français ;
++- si une recherche n'a rien trouvé, appelle `response` et dis-le simplement ;
++- si une opération différente reste réellement nécessaire, appelle cet autre
++  outil avec des arguments différents ;
++- si rien d'autre n'est possible, appelle `response` et explique le blocage.
++
++N'ajoute aucun texte hors de l'objet JSON.
+diff --git a/Agent-OS-V11/tests/test_paul_profile.py b/Agent-OS-V11/tests/test_paul_profile.py
+new file mode 100644
+index 0000000..63ac168
+--- /dev/null
++++ b/Agent-OS-V11/tests/test_paul_profile.py
+@@ -0,0 +1,44 @@
++from pathlib import Path
++import unittest
++
++
++ROOT = (
++    Path(__file__).resolve().parents[1]
++    / "overlay"
++    / "usr"
++    / "plugins"
++    / "agent_os_memory"
++    / "agents"
++    / "paul"
++)
++
++
++class PaulProfileTests(unittest.TestCase):
++    def test_local_model_contract_and_repeat_guard_are_installed(self):
++        prompts = ROOT / "prompts"
++        required = {
++            "agent.system.main.communication.md",
++            "agent.system.main.solving.md",
++            "agent.system.tools.md",
++            "agent.system.tool.response.md",
++            "fw.msg_repeat.md",
++        }
++        self.assertTrue(required.issubset({path.name for path in prompts.iterdir()}))
++
++        combined = "\n".join(
++            (prompts / name).read_text(encoding="utf-8") for name in required
++        )
++        self.assertIn("tool_name", combined)
++        self.assertIn("tool_args", combined)
++        self.assertIn("life_*", combined)
++        self.assertIn("response", combined)
++        self.assertIn("même outil", combined)
++
++    def test_profile_context_does_not_treat_tool_output_as_user_memory(self):
++        profile = (ROOT / "agent.yaml").read_text(encoding="utf-8")
++        self.assertIn("Un résultat d'outil n'est jamais une nouvelle", profile)
++        self.assertIn("réenregistré", profile)
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.51.1
+

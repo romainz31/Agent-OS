@@ -4,12 +4,12 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .normalization import clean, date_key, normalize, parse_iso, tokens
+from .normalization import clean, normalize, parse_user_date, tokens
 
 
 KINDS = {
@@ -19,6 +19,13 @@ KINDS = {
 FACT_KINDS = {"fact", "preference", "relation"}
 STATUSES = {"pending", "scheduled", "done", "logged", "cancelled", "archived"}
 DATE_PRECISIONS = {"exact", "day", "week", "month", "unknown"}
+TASK_BUCKETS = {"daily", "backlog"}
+TASK_BUCKET_ALIASES = {
+    "jour": "daily", "quotidien": "daily", "daily": "daily",
+    "general": "backlog", "général": "backlog", "backlog": "backlog",
+    "todo": "backlog", "todolist": "backlog", "liste": "backlog",
+}
+OBSERVATION_KINDS = {"capture", "reinforced", "action", "completion", "rollover"}
 
 KIND_ALIASES = {
     "todo": "task", "tache": "task", "tâche": "task",
@@ -37,7 +44,7 @@ class PersonalMemoryStore:
     retrieve general knowledge, but it must not own lifecycle state here.
     """
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(
         self,
@@ -89,6 +96,7 @@ class PersonalMemoryStore:
                     start_at TEXT,
                     end_at TEXT,
                     due_at TEXT,
+                    task_bucket TEXT NOT NULL DEFAULT 'backlog',
                     completed_at TEXT,
                     date_precision TEXT NOT NULL DEFAULT 'unknown',
                     time_expression TEXT,
@@ -110,6 +118,24 @@ class PersonalMemoryStore:
                     ON records(kind, status, start_at, due_at, completed_at);
                 CREATE INDEX IF NOT EXISTS idx_records_title
                     ON records(normalized_title);
+
+                CREATE TABLE IF NOT EXISTS record_observations(
+                    id TEXT PRIMARY KEY,
+                    record_id TEXT NOT NULL,
+                    observation_kind TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    source_text TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    context_id TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    occurrences INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(record_id) REFERENCES records(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_observations_record
+                    ON record_observations(record_id, occurred_at);
+                CREATE INDEX IF NOT EXISTS idx_observations_kind_time
+                    ON record_observations(observation_kind, occurred_at);
 
                 CREATE TABLE IF NOT EXISTS entities(
                     id TEXT PRIMARY KEY,
@@ -182,9 +208,59 @@ class PersonalMemoryStore:
                 );
                 """
             )
+            columns = {
+                row[1] for row in db.execute("PRAGMA table_info(records)").fetchall()
+            }
+            added_task_bucket = False
+            if "task_bucket" not in columns:
+                db.execute(
+                    "ALTER TABLE records ADD COLUMN task_bucket TEXT NOT NULL DEFAULT 'backlog'"
+                )
+                added_task_bucket = True
+            db.execute(
+                """UPDATE records
+                   SET task_bucket=CASE
+                       WHEN kind='task' AND due_at IS NOT NULL THEN 'daily'
+                       ELSE 'backlog'
+                       END
+                   WHERE ?=1 OR task_bucket IS NULL OR task_bucket=''""",
+                (int(added_task_bucket),),
+            )
+            self._backfill_observations(db)
             db.execute(
                 "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version',?)",
                 (str(self.SCHEMA_VERSION),),
+            )
+
+    def _backfill_observations(self, db: sqlite3.Connection) -> None:
+        """Create one evidence row for records created by V11.0.
+
+        Older V11 records kept only a compressed source_text and an occurrences
+        counter. We cannot recreate details that were never stored, but we can
+        make those records queryable through the new evidence API without
+        changing their logical meaning.
+        """
+        rows = db.execute(
+            """SELECT r.* FROM records r
+               LEFT JOIN record_observations o ON o.record_id=r.id
+               WHERE o.id IS NULL"""
+        ).fetchall()
+        for row in rows:
+            occurred_at = (
+                row["completed_at"] or row["start_at"] or row["due_at"]
+                or row["created_at"]
+            )
+            observation_kind = "action" if row["kind"] == "action" else "capture"
+            self._append_observation(
+                db,
+                record_id=row["id"],
+                observation_kind=observation_kind,
+                title=row["title"],
+                source_text=row["source_text"] or row["title"],
+                occurred_at=occurred_at,
+                context_id=row["context_id"] or "",
+                metadata={"legacy_v11_backfill": True},
+                occurrences=max(1, int(row["occurrences"] or 1)),
             )
 
     @staticmethod
@@ -207,6 +283,7 @@ class PersonalMemoryStore:
             result["metadata"] = {}
         result["inferred"] = bool(result.get("inferred"))
         result["active"] = bool(result.get("active"))
+        result.setdefault("task_bucket", "backlog")
         return result
 
     @staticmethod
@@ -222,6 +299,71 @@ class PersonalMemoryStore:
         if kind == "action":
             return "done"
         return "logged"
+
+    @staticmethod
+    def _observation(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+        result = dict(row)
+        try:
+            result["metadata"] = json.loads(result.pop("metadata_json", "{}") or "{}")
+        except json.JSONDecodeError:
+            result["metadata"] = {}
+        return result
+
+    def _append_observation(
+        self,
+        db: sqlite3.Connection,
+        *,
+        record_id: str,
+        observation_kind: str,
+        title: str,
+        source_text: str,
+        occurred_at: str | None,
+        context_id: str = "",
+        metadata: dict[str, Any] | None = None,
+        occurrences: int = 1,
+    ) -> dict[str, Any]:
+        observation_kind = normalize(observation_kind) or "capture"
+        if observation_kind not in OBSERVATION_KINDS:
+            raise ValueError(f"Type d'observation inconnu : {observation_kind}")
+        now = self.now().isoformat()
+        observation_id = self._public_id("O")
+        db.execute(
+            """INSERT INTO record_observations(
+                id,record_id,observation_kind,title,source_text,occurred_at,
+                context_id,metadata_json,occurrences,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (
+                observation_id,
+                record_id,
+                observation_kind,
+                clean(title),
+                clean(source_text) or clean(title),
+                occurred_at or now,
+                clean(context_id),
+                self._json(metadata or {}),
+                max(1, int(occurrences or 1)),
+                now,
+            ),
+        )
+        return self._observation(
+            db.execute(
+                "SELECT * FROM record_observations WHERE id=?", (observation_id,)
+            ).fetchone()
+        )
+
+    def _observations_for_record(
+        self,
+        db: sqlite3.Connection,
+        record_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        rows = db.execute(
+            """SELECT * FROM record_observations
+               WHERE record_id=? ORDER BY occurred_at DESC, created_at DESC LIMIT ?""",
+            (record_id, max(1, min(200, int(limit or 50)))),
+        ).fetchall()
+        return [self._observation(row) for row in rows]
 
     def _audit(
         self,
@@ -256,6 +398,14 @@ class PersonalMemoryStore:
         due_at: str | None,
         completed_at: str | None,
     ) -> sqlite3.Row | None:
+        if kind == "task" and not due_at:
+            return db.execute(
+                """SELECT * FROM records
+                   WHERE active=1 AND kind='task' AND status='pending'
+                     AND task_bucket='backlog' AND normalized_title=?
+                   ORDER BY updated_at DESC LIMIT 1""",
+                (normalized_title,),
+            ).fetchone()
         day = (completed_at or start_at or due_at or self.now().isoformat())[:10]
         return db.execute(
             """SELECT * FROM records
@@ -318,6 +468,7 @@ class PersonalMemoryStore:
         subject: str = "user",
         predicate: str = "",
         value: str = "",
+        task_bucket: str = "",
     ) -> dict[str, Any]:
         kind = KIND_ALIASES.get(normalize(kind), normalize(kind))
         if kind not in KINDS:
@@ -334,11 +485,21 @@ class PersonalMemoryStore:
         if date_precision not in DATE_PRECISIONS:
             raise ValueError(f"Précision de date inconnue : {date_precision}")
 
-        start_at = parse_iso(start_at)
-        end_at = parse_iso(end_at)
-        due_at = parse_iso(due_at)
-        completed_at = parse_iso(completed_at)
         now = self.now()
+        start_at = parse_user_date(start_at, reference=now)
+        end_at = parse_user_date(end_at, reference=now)
+        due_at = parse_user_date(due_at, reference=now)
+        completed_at = parse_user_date(completed_at, reference=now)
+        if kind == "task":
+            task_bucket = TASK_BUCKET_ALIASES.get(
+                normalize(task_bucket), normalize(task_bucket)
+            ) or ("daily" if due_at else "backlog")
+            if task_bucket not in TASK_BUCKETS:
+                raise ValueError(f"Catégorie de tâche inconnue : {task_bucket}")
+            if not due_at:
+                task_bucket = "backlog"
+        else:
+            task_bucket = "backlog"
         if kind == "action" and not completed_at:
             completed_at = now.isoformat()
         if kind == "task" and status == "done" and not completed_at:
@@ -361,10 +522,24 @@ class PersonalMemoryStore:
                     )
                     after_row = db.execute("SELECT * FROM records WHERE id=?", (pending["id"],)).fetchone()
                     after = self._record(after_row)
+                    observation = self._append_observation(
+                        db,
+                        record_id=pending["id"],
+                        observation_kind="completion",
+                        title=title,
+                        source_text=source_text or title,
+                        occurred_at=completed_at,
+                        context_id=context_id,
+                        metadata=metadata,
+                    )
                     self._audit(db, pending["id"], "complete", before, after,
                                 reason="Action reliée à une tâche existante", context_id=context_id)
                     self._remember_state(db, context_id, "capture", {}, [pending["id"]])
-                    return {"operation": "completed_existing_task", "record": after}
+                    return {
+                        "operation": "completed_existing_task",
+                        "record": after,
+                        "observation": observation,
+                    }
 
             duplicate = None if kind in FACT_KINDS else self._find_exact_duplicate(
                 db, kind=kind, normalized_title=normalized_title,
@@ -377,21 +552,31 @@ class PersonalMemoryStore:
                 )
                 row = db.execute("SELECT * FROM records WHERE id=?", (duplicate["id"],)).fetchone()
                 result = self._record(row)
+                observation = self._append_observation(
+                    db,
+                    record_id=row["id"],
+                    observation_kind="action" if kind == "action" else "reinforced",
+                    title=title,
+                    source_text=source_text,
+                    occurred_at=completed_at or start_at or due_at or now.isoformat(),
+                    context_id=context_id,
+                    metadata=metadata,
+                )
                 self._audit(db, row["id"], "reinforce", self._record(duplicate), result,
                             reason="Déclaration identique", context_id=context_id)
-                return {"operation": "reinforced", "record": result}
+                return {"operation": "reinforced", "record": result, "observation": observation}
 
             record_id = self._public_id("L")
             db.execute(
                 """INSERT INTO records(
                     id,kind,title,normalized_title,status,start_at,end_at,due_at,
-                    completed_at,date_precision,time_expression,recurrence_rule,
+                    task_bucket,completed_at,date_precision,time_expression,recurrence_rule,
                     priority,importance,confidence,inferred,source_role,source_text,
                     context_id,metadata_json,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     record_id, kind, title, normalized_title, status, start_at,
-                    end_at, due_at, completed_at, date_precision,
+                    end_at, due_at, task_bucket, completed_at, date_precision,
                     clean(time_expression), clean(recurrence_rule), clean(priority),
                     self._bounded(importance, 0.5), self._bounded(confidence, 1.0),
                     int(bool(inferred)), source_role, source_text, clean(context_id),
@@ -409,11 +594,26 @@ class PersonalMemoryStore:
                     value=value or title, confidence=confidence, inferred=inferred,
                 )
 
+            observation = self._append_observation(
+                db,
+                record_id=record_id,
+                observation_kind=(
+                    "action" if kind == "action"
+                    else "completion" if kind == "task" and status == "done"
+                    else "capture"
+                ),
+                title=title,
+                source_text=source_text,
+                occurred_at=completed_at or start_at or due_at or now.isoformat(),
+                context_id=context_id,
+                metadata=metadata,
+            )
+
             row = db.execute("SELECT * FROM records WHERE id=?", (record_id,)).fetchone()
             result = self._record(row)
             self._audit(db, record_id, "create", None, result, context_id=context_id)
             self._remember_state(db, context_id, "capture", {}, [record_id])
-            payload = {"operation": "created", "record": result}
+            payload = {"operation": "created", "record": result, "observation": observation}
             if fact_result:
                 payload["fact"] = fact_result
             return payload
@@ -567,14 +767,22 @@ class PersonalMemoryStore:
         context_id: str = "",
         follow_up: bool = False,
         limit: int = 20,
+        task_bucket: str = "",
+        include_details: bool = True,
     ) -> dict[str, Any]:
+        raw_kinds = [kinds] if isinstance(kinds, str) else list(kinds or [])
+        raw_statuses = [statuses] if isinstance(statuses, str) else list(statuses or [])
         query_spec: dict[str, Any] = {
-            "text": clean(text), "kinds": list(kinds or []),
-            "statuses": list(statuses or []), "start": start, "end": end,
+            "text": clean(text), "kinds": raw_kinds,
+            "statuses": raw_statuses, "start": start, "end": end,
             "subject": clean(subject), "predicate": clean(predicate),
             "entity": clean(entity), "entity_type": normalize(entity_type),
             "current_facts_only": bool(current_facts_only),
             "aggregate": normalize(aggregate) or "list",
+            "task_bucket": TASK_BUCKET_ALIASES.get(
+                normalize(task_bucket), normalize(task_bucket)
+            ),
+            "include_details": bool(include_details),
         }
         with self.connect() as db:
             if follow_up:
@@ -588,8 +796,15 @@ class PersonalMemoryStore:
                 if end:
                     query_spec["end"] = end
 
-            start_iso = parse_iso(query_spec.get("start"))
-            end_iso = parse_iso(query_spec.get("end"), end_of_day=True)
+            if query_spec["task_bucket"] not in ("", *TASK_BUCKETS):
+                raise ValueError(
+                    f"Catégorie de tâche inconnue : {query_spec['task_bucket']}"
+                )
+            reference = self.now()
+            start_iso = parse_user_date(query_spec.get("start"), reference=reference)
+            end_iso = parse_user_date(
+                query_spec.get("end"), reference=reference, end_of_day=True
+            )
             wanted_kinds = {
                 KIND_ALIASES.get(normalize(item), normalize(item))
                 for item in query_spec.get("kinds", []) if normalize(item)
@@ -598,6 +813,27 @@ class PersonalMemoryStore:
             rows = db.execute("SELECT * FROM records WHERE active=1 ORDER BY updated_at DESC").fetchall()
             result: list[dict[str, Any]] = []
             query_tokens = tokens(query_spec.get("text", ""))
+
+            def in_window(values: Iterable[str | None]) -> bool:
+                usable = [str(value) for value in values if value]
+                if not usable:
+                    return not start_iso and not end_iso
+                return any(
+                    (not start_iso or value >= start_iso)
+                    and (not end_iso or value <= end_iso)
+                    for value in usable
+                )
+
+            def matches_text(values: Iterable[str]) -> bool:
+                if not query_tokens:
+                    return True
+                candidate = tokens(" ".join(values))
+                normalized_query = normalize(query_spec["text"])
+                return bool(query_tokens & candidate) or any(
+                    normalized_query and normalized_query in normalize(value)
+                    for value in values
+                )
+
             for row in rows:
                 item = self._record(row)
                 # Facts have their own versioned projection below. Returning the
@@ -607,6 +843,11 @@ class PersonalMemoryStore:
                 if wanted_kinds and item["kind"] not in wanted_kinds:
                     continue
                 if wanted_statuses and item["status"] not in wanted_statuses:
+                    continue
+                if query_spec["task_bucket"] and (
+                    item["kind"] != "task"
+                    or item["task_bucket"] != query_spec["task_bucket"]
+                ):
                     continue
                 item["entities"] = self._entities_for_record(db, item["id"])
                 if query_spec.get("entity") and not any(
@@ -619,15 +860,36 @@ class PersonalMemoryStore:
                     for link in item["entities"]
                 ):
                     continue
-                moment = item.get("completed_at") or item.get("start_at") or item.get("due_at") or item["created_at"]
-                if start_iso and moment < start_iso:
+                observations = self._observations_for_record(db, item["id"])
+                if item["kind"] == "task":
+                    time_values = [
+                        item.get("due_at") or item.get("completed_at")
+                        or item["created_at"]
+                    ]
+                elif item["kind"] in {"appointment", "event"}:
+                    time_values = [
+                        item.get("start_at") or item.get("due_at")
+                        or item["created_at"]
+                    ]
+                elif item["kind"] == "action":
+                    time_values = [item.get("completed_at") or item["created_at"]]
+                else:
+                    time_values = [item["created_at"]]
+                if not in_window(
+                    time_values
+                ):
                     continue
-                if end_iso and moment > end_iso:
+                if not matches_text(
+                    [
+                        item["title"], item["source_text"],
+                        *(observation.get("title", "") for observation in observations),
+                        *(observation.get("source_text", "") for observation in observations),
+                    ]
+                ):
                     continue
-                if query_tokens:
-                    candidate = tokens(item["title"] + " " + item["source_text"])
-                    if not (query_tokens & candidate) and normalize(query_spec["text"]) not in item["normalized_title"]:
-                        continue
+                item["occurrence_count"] = int(item.get("occurrences") or 1)
+                if query_spec["include_details"]:
+                    item["observations"] = observations
                 result.append(item)
 
             facts: list[dict[str, Any]] = []
@@ -649,28 +911,105 @@ class PersonalMemoryStore:
                         query_tokens & tokens(item["subject"] + " " + item["predicate"] + " " + item["value"])
                     ):
                         continue
+                    if end_iso and item["valid_from"] > end_iso:
+                        continue
+                    if start_iso and item.get("valid_to") and item["valid_to"] < start_iso:
+                        continue
                     facts.append(item)
 
+            activities: list[dict[str, Any]] = []
+            activity_requested = bool(
+                "action" in wanted_kinds
+                or (not wanted_kinds and (query_tokens or query_spec["aggregate"] == "count"))
+            )
+            if activity_requested:
+                activity_rows = db.execute(
+                    """SELECT o.*, r.kind AS record_kind, r.title AS record_title,
+                              r.status AS record_status, r.task_bucket AS record_task_bucket
+                       FROM record_observations o
+                       JOIN records r ON r.id=o.record_id
+                       WHERE r.active=1
+                         AND o.observation_kind IN ('action','completion')
+                       ORDER BY o.occurred_at DESC, o.created_at DESC"""
+                ).fetchall()
+                for row in activity_rows:
+                    if wanted_kinds and "action" not in wanted_kinds:
+                        continue
+                    if wanted_statuses and row["record_status"] not in wanted_statuses:
+                        continue
+                    if query_spec["task_bucket"] and (
+                        row["record_kind"] != "task"
+                        or row["record_task_bucket"] != query_spec["task_bucket"]
+                    ):
+                        continue
+                    if not in_window([row["occurred_at"]]):
+                        continue
+                    if not matches_text(
+                        [row["title"], row["source_text"], row["record_title"]]
+                    ):
+                        continue
+                    entities = self._entities_for_record(db, row["record_id"])
+                    if query_spec.get("entity") and not any(
+                        normalize(query_spec["entity"]) in normalize(link["canonical_name"])
+                        for link in entities
+                    ):
+                        continue
+                    if query_spec.get("entity_type") and not any(
+                        normalize(link["entity_type"]) == query_spec["entity_type"]
+                        for link in entities
+                    ):
+                        continue
+                    activity = self._observation(row)
+                    activity.update(
+                        {
+                            "record_id": row["record_id"],
+                            "record_kind": row["record_kind"],
+                            "record_title": row["record_title"],
+                            "record_status": row["record_status"],
+                            "task_bucket": row["record_task_bucket"],
+                            "entities": entities,
+                        }
+                    )
+                    activities.append(activity)
+
+            record_occurrence_count = sum(
+                int(item.get("occurrences") or 1) for item in result
+            )
+            fact_occurrence_count = sum(
+                int(item.get("occurrences") or 1) for item in facts
+            )
+            activity_count = sum(
+                int(item.get("occurrences") or 1) for item in activities
+            )
             limit = max(1, min(100, int(limit or 20)))
             result = result[:limit]
             facts = facts[:limit]
-            ids = [item["id"] for item in result]
-            if not ids:
-                ids = [
-                    str(item.get("source_record_id"))
-                    for item in facts if item.get("source_record_id")
-                ]
+            activities = activities[:limit]
+            ids: list[str] = []
+            for item in [*result, *facts, *activities]:
+                record_id = item.get("id") or item.get("source_record_id") or item.get("record_id")
+                if record_id and record_id not in ids:
+                    ids.append(str(record_id))
             self._remember_state(db, context_id, "query", query_spec, ids)
+            if "action" in wanted_kinds or (not wanted_kinds and query_tokens and activity_count):
+                count = activity_count
+            else:
+                count = record_occurrence_count + fact_occurrence_count
             payload: dict[str, Any] = {
                 "query": query_spec,
                 "records": result,
                 "facts": facts,
-                "found": len(result) + len(facts),
+                "activities": activities,
+                "found": len(result) + len(facts) or len(activities),
+                "record_count": len(result),
+                "fact_count": len(facts),
+                "occurrence_count": record_occurrence_count + fact_occurrence_count,
+                "activity_count": activity_count,
                 "source": "local_personal_memory",
                 "web_needed": False,
             }
             if query_spec["aggregate"] == "count":
-                payload["count"] = len(result) + len(facts)
+                payload["count"] = count
             return payload
 
     def _resolve_record(
@@ -737,11 +1076,13 @@ class PersonalMemoryStore:
                 "title", "status", "start_at", "end_at", "due_at",
                 "completed_at", "date_precision", "time_expression",
                 "recurrence_rule", "priority", "importance", "confidence",
-                "metadata",
+                "metadata", "task_bucket",
             }
             clean_changes = {key: value for key, value in changes.items() if key in allowed}
+            completes_task = False
             if action == "complete":
                 clean_changes.update(status="done", completed_at=self.now().isoformat())
+                completes_task = True
             elif action == "cancel":
                 clean_changes["status"] = "cancelled"
             elif action == "archive":
@@ -753,9 +1094,25 @@ class PersonalMemoryStore:
                 clean_changes["status"] = normalize(clean_changes["status"])
                 if clean_changes["status"] not in STATUSES:
                     raise ValueError("Statut de mise à jour invalide.")
+                completes_task = completes_task or (
+                    before["status"] != "done" and clean_changes["status"] == "done"
+                )
             for key in ("start_at", "end_at", "due_at", "completed_at"):
                 if key in clean_changes:
-                    clean_changes[key] = parse_iso(clean_changes[key])
+                    clean_changes[key] = parse_user_date(
+                        clean_changes[key], reference=self.now()
+                    )
+            if "task_bucket" in clean_changes:
+                clean_changes["task_bucket"] = TASK_BUCKET_ALIASES.get(
+                    normalize(clean_changes["task_bucket"]),
+                    normalize(clean_changes["task_bucket"]),
+                )
+                if clean_changes["task_bucket"] not in TASK_BUCKETS:
+                    raise ValueError("Catégorie de tâche invalide.")
+            if before["kind"] == "task" and "due_at" in clean_changes:
+                clean_changes["task_bucket"] = (
+                    "daily" if clean_changes["due_at"] else "backlog"
+                )
             if "title" in clean_changes:
                 clean_changes["title"] = clean(clean_changes["title"])
                 clean_changes["normalized_title"] = normalize(clean_changes["title"])
@@ -772,9 +1129,24 @@ class PersonalMemoryStore:
                 (*clean_changes.values(), row["id"]),
             )
             after = self._record(db.execute("SELECT * FROM records WHERE id=?", (row["id"],)).fetchone())
+            observation = None
+            if completes_task:
+                observation = self._append_observation(
+                    db,
+                    record_id=row["id"],
+                    observation_kind="completion",
+                    title=after["title"],
+                    source_text=clean(reason) or "Tâche terminée",
+                    occurred_at=after.get("completed_at") or self.now().isoformat(),
+                    context_id=context_id,
+                    metadata={"via": "life_update"},
+                )
             self._audit(db, row["id"], action, before, after, reason=reason, context_id=context_id)
             self._remember_state(db, context_id, action, {}, [row["id"]])
-            return {"operation": action, "record": after}
+            result = {"operation": action, "record": after}
+            if observation:
+                result["observation"] = observation
+            return result
 
     def forget(
         self,
@@ -817,7 +1189,7 @@ class PersonalMemoryStore:
             return {"operation": "forgotten", "record_ids": removed, "count": len(removed)}
 
     def rollover(self, *, target_date: str | None = None) -> dict[str, Any]:
-        target = (parse_iso(target_date) or self.now().isoformat())[:10]
+        target = (parse_user_date(target_date, reference=self.now()) or self.now().isoformat())[:10]
         moved: list[dict[str, Any]] = []
         with self.connect() as db:
             rows = db.execute(
@@ -829,18 +1201,29 @@ class PersonalMemoryStore:
             ).fetchall()
             for row in rows:
                 before = self._record(row)
-                old_due = datetime.fromisoformat(row["due_at"])
-                new_due = old_due.replace(
-                    year=int(target[:4]), month=int(target[5:7]), day=int(target[8:10])
-                ).isoformat()
                 metadata = dict(before.get("metadata", {}))
                 metadata["reschedule_count"] = int(metadata.get("reschedule_count", 0)) + 1
                 metadata.setdefault("original_due_at", row["due_at"])
+                metadata["last_due_at"] = row["due_at"]
+                metadata.setdefault("overdue_since", target)
                 db.execute(
-                    "UPDATE records SET due_at=?,metadata_json=?,updated_at=? WHERE id=?",
-                    (new_due, self._json(metadata), self.now().isoformat(), row["id"]),
+                    """UPDATE records
+                       SET due_at=NULL,task_bucket='backlog',metadata_json=?,updated_at=?
+                       WHERE id=?""",
+                    (self._json(metadata), self.now().isoformat(), row["id"]),
                 )
                 after = self._record(db.execute("SELECT * FROM records WHERE id=?", (row["id"],)).fetchone())
+                self._append_observation(
+                    db,
+                    record_id=row["id"],
+                    observation_kind="rollover",
+                    title=after["title"],
+                    source_text=(
+                        f"Tâche non réalisée prévue le {row['due_at'][:10]}"
+                    ),
+                    occurred_at=self.now().isoformat(),
+                    metadata={"previous_due_at": row["due_at"], "target_date": target},
+                )
                 self._audit(db, row["id"], "rollover", before, after,
                             reason="Tâche datée non terminée")
                 moved.append(after)

@@ -22,6 +22,8 @@ if (-not $SkipClone) {
     }
 
     if ($Upstream.commit -and $Upstream.commit -ne "__AGENT_ZERO_COMMIT__") {
+        git -C $InstallPath fetch origin $Upstream.commit
+        if ($LASTEXITCODE -ne 0) { throw "Echec du telechargement de la version Agent Zero demandee." }
         git -C $InstallPath checkout $Upstream.commit
         if ($LASTEXITCODE -ne 0) { throw "Echec du verrouillage de la version Agent Zero." }
     }

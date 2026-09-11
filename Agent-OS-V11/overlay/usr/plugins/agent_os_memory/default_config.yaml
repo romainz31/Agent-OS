@@ -2,4 +2,11 @@ timezone: Europe/Paris
 assistant_name: Paul
 auto_rollover_tasks: true
 default_query_limit: 20
-allow_inferred_facts: true
+allow_inferred_facts: false
+semantic_intake_enabled: true
+semantic_intake_history_chars: 2400
+semantic_intake_known_items: 24
+semantic_intake_debug: true
+semantic_intake_strict_errors: true
+
+semantic_intake_retry_invalid_output: true

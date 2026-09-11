@@ -1,7 +1,11 @@
-## `life_rollover` — report quotidien des tâches
+### life_rollover
 
-Utilise `life_rollover` au début d'une journée ou quand l'utilisateur demande
-de reporter les tâches non faites. `target_date` est une date ISO facultative.
+Exécute le passage d'une journée à l'autre pour les tâches personnelles.
 
-Seules les tâches `pending`, en retard et explicitement datées sont déplacées.
-Les tâches sans date, rendez-vous et événements ne bougent jamais.
+Une tâche `pending` explicitement datée et en retard est retirée de la liste du
+jour et conservée dans le backlog général. Sa date prévue, la date de report,
+le nombre de reports et l'historique sont conservés.
+
+Ne déplace jamais automatiquement un rendez-vous, un événement, une tâche sans
+date ou une tâche déjà terminée. `target_date` est une date ISO facultative ;
+sans argument, utilise la date locale courante.
