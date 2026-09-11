@@ -308,9 +308,45 @@
       <div id="sessions-list"></div>
     </aside>
     <main>
+      <section id="paul-dashboard" aria-label="Tableau de bord Paul">
+        <header id="paul-header">
+          <div>
+            <p id="paul-greeting">Bonjour Romain</p>
+            <p id="paul-date"></p>
+          </div>
+          <div id="paul-clock" aria-live="polite"></div>
+          <div id="paul-status"><span></span> Paul est prêt</div>
+        </header>
+        <div id="paul-overview">
+          <section class="paul-card paul-today-card" aria-labelledby="paul-today-title">
+            <div class="paul-card-heading">
+              <div>
+                <p class="paul-eyebrow">Aujourd’hui</p>
+                <h2 id="paul-today-title">À faire et à ne pas oublier</h2>
+              </div>
+              <button id="paul-view-all" type="button">Tout voir</button>
+            </div>
+            <div id="paul-today-list" class="paul-list">
+              <p class="paul-empty">Chargement de ton programme…</p>
+            </div>
+          </section>
+          <section class="paul-card paul-week-card" aria-labelledby="paul-week-title">
+            <div class="paul-card-heading">
+              <div>
+                <p class="paul-eyebrow">Vue d’ensemble</p>
+                <h2 id="paul-week-title">Les 7 prochains jours</h2>
+              </div>
+              <button id="paul-refresh" type="button" title="Actualiser">↻</button>
+            </div>
+            <div id="paul-week-list" class="paul-week-list">
+              <p class="paul-empty">Chargement de l’agenda…</p>
+            </div>
+          </section>
+        </div>
+      </section>
       <div id="top-container">
         <div id="mood"></div>
-        <button id="info">Info</button>
+        <button id="info">État du système</button>
       </div>
       <div id="feed">
         <p id="no-bubble" class="hide">
