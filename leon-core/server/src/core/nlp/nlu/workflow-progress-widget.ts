@@ -4,13 +4,6 @@ import { RoutingMode } from '@/types'
 
 type WorkflowBaseStep = 'routing' | 'choosing_skill' | 'picking_action' | 'resolving_parameters'
 
-const WORKFLOW_LABELS = {
-  routing: 'Analyse de ta demande…',
-  choosing_skill: 'Choix de la compétence…',
-  picking_action: 'Choix de l\'action…',
-  resolving_parameters: 'Vérification des informations…'
-} as const
-
 /**
  * Tracks and renders workflow progress using the same widget system as agent planning.
  * The widget keeps base workflow phases plus dynamic per-action execution steps.
@@ -53,8 +46,7 @@ export class WorkflowProgressWidget {
   }
 
   public startAction(actionName: string): void {
-    void actionName
-    const label = 'Leon traite ta demande…'
+    const label = `Running ${actionName} action...`
     const existingIndex = this.actionLabels.indexOf(label)
 
     this.currentBaseStep = null
@@ -72,7 +64,7 @@ export class WorkflowProgressWidget {
   public completeRoutingOnly(): void {
     this.actionLabels = []
     this.currentActionIndex = null
-    this.emitStatic([{ label: WORKFLOW_LABELS.routing, status: 'completed' }])
+    this.emitStatic([{ label: 'Routing...', status: 'completed' }])
   }
 
   public completeSelectionNotFound(): void {
@@ -120,10 +112,10 @@ export class WorkflowProgressWidget {
       const labels: string[] = []
 
       if (this.routingMode === RoutingMode.Smart) {
-        labels.push(WORKFLOW_LABELS.routing)
+        labels.push('Routing...')
       }
 
-      labels.push(WORKFLOW_LABELS.resolving_parameters)
+      labels.push('Resolving parameters...')
 
       return labels
     }
@@ -131,11 +123,11 @@ export class WorkflowProgressWidget {
     const labels: string[] = []
 
     if (this.routingMode === RoutingMode.Smart) {
-      labels.push(WORKFLOW_LABELS.routing)
+      labels.push('Routing...')
     }
 
-    labels.push(WORKFLOW_LABELS.choosing_skill)
-    labels.push(WORKFLOW_LABELS.picking_action)
+    labels.push('Choosing skill...')
+    labels.push('Picking action...')
 
     return labels
   }
@@ -149,10 +141,10 @@ export class WorkflowProgressWidget {
     }
 
     const stepLabelMap: Record<WorkflowBaseStep, string> = {
-      routing: WORKFLOW_LABELS.routing,
-      choosing_skill: WORKFLOW_LABELS.choosing_skill,
-      picking_action: WORKFLOW_LABELS.picking_action,
-      resolving_parameters: WORKFLOW_LABELS.resolving_parameters
+      routing: 'Routing...',
+      choosing_skill: 'Choosing skill...',
+      picking_action: 'Picking action...',
+      resolving_parameters: 'Resolving parameters...'
     }
 
     const index = labels.indexOf(stepLabelMap[step])

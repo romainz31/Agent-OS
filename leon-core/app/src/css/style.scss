@@ -1164,16 +1164,8 @@ main {
   font-size: 1rem;
 }
 
-/* Leon v2 keeps internal reasoning and technical tool payloads out of the chat. */
-.reasoning-block-container,
-.tool-content,
-.tool-subtitle,
-.tool-raw-details {
-  display: none !important;
-}
-
-/* Leon v2 keeps the internal workflow plan out of the conversation as well. */
-.leon-v2 .bubble-container[data-widget-id^='workflow-progress-'] {
+/* Leon v2 keeps the model's private reasoning out of the chat. */
+.reasoning-block-container {
   display: none !important;
 }
 
