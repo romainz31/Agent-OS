@@ -213,6 +213,7 @@ export default class Client {
 
       // Leon has finished to answer
       this._isLeonGeneratingAnswer = false
+      window.dispatchEvent(new Event('leon-v2-data-changed'))
 
       const isPlanWidget =
         data && typeof data === 'object' && data.widget === 'PlanWidget'

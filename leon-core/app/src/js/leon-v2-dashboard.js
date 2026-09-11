@@ -237,10 +237,15 @@ export async function initLeonV2Dashboard({ serverUrl, timeZone = 'Europe/Paris'
   window.setInterval(updateClock, 1_000)
   createPanelController(serverUrl)
 
-  try {
-    const response = await fetch(getEndpoint(serverUrl, 'dashboard'))
-    renderDashboard(await response.json())
-  } catch {
-    renderDashboard({ tasks: [], agenda: [] })
+  const refreshDashboard = async () => {
+    try {
+      const response = await fetch(getEndpoint(serverUrl, 'dashboard'))
+      renderDashboard(await response.json())
+    } catch {
+      renderDashboard({ tasks: [], agenda: [] })
+    }
   }
+
+  window.addEventListener('leon-v2-data-changed', refreshDashboard)
+  await refreshDashboard()
 }

@@ -325,15 +325,19 @@ export default class NLU {
     }
 
     const hasDateReference =
-      /\b(demain|apres-demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/.test(
+      /\b(aujourd|demain|apres-demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/.test(
         normalizedUtterance
       )
     const hasPlanIntent =
-      /\b(dois|doit|faut|prevois|prevu|rendez-vous|rdv|aller chercher|emmener|recuperer)\b/.test(
+      /\b(dois|doit|faut|prevois|prevoit|prevu|rendez-vous|rdv|aller chercher|emmener|recuperer)\b/.test(
+        normalizedUtterance
+      )
+    const hasTaskIntent =
+      /\b(tache|taches|a faire|prevois|prevoit|prevu)\b/.test(
         normalizedUtterance
       )
 
-    if (hasDateReference && hasPlanIntent) {
+    if ((hasDateReference && hasPlanIntent) || hasTaskIntent) {
       return 'personal_agenda_skill'
     }
 
@@ -390,6 +394,10 @@ export default class NLU {
 
     if (relativeDays > 0) {
       date.setDate(date.getDate() + relativeDays)
+      return date.toISOString().slice(0, 10)
+    }
+
+    if (normalizedUtterance.includes('aujourd')) {
       return date.toISOString().slice(0, 10)
     }
 
@@ -450,6 +458,45 @@ export default class NLU {
       event_title: eventTitle,
       event_date: eventDate,
       ...(eventTime ? { event_time: eventTime } : {})
+    }
+  }
+
+  private getTaskArguments(
+    utterance: NLPUtterance
+  ): Record<string, unknown> | null {
+    const normalizedUtterance = this.normalizeFrenchUtterance(utterance)
+    const taskDate = this.getDateForFrenchReference(normalizedUtterance)
+    let taskText = ''
+
+    const colonIndex = utterance.indexOf(':')
+    if (colonIndex >= 0) {
+      taskText = utterance.slice(colonIndex + 1).trim()
+    } else {
+      taskText = utterance
+        .replace(
+          /^\s*(?:je\s+)?(?:prevois|prévois|prevoit|prévoit|prevu|prévu)\s+de\s+/i,
+          ''
+        )
+        .replace(
+          /^\s*(?:dans\s+les\s+taches\s+a\s+faire|dans\s+les\s+tâches\s+à\s+faire)\s*(?:ajoute|ajouter|mets|met)\s*/i,
+          ''
+        )
+        .replace(/\b(?:aujourd'hui|aujourd hui|aujourdhui|demain)\b/gi, '')
+        .trim()
+    }
+
+    const titles = taskText
+      .split(/,|;|\s+et\s+/i)
+      .map((title) => title.replace(/[.!?]+$/, '').trim())
+      .filter((title) => title.length > 0)
+
+    if (titles.length === 0) {
+      return null
+    }
+
+    return {
+      task_titles: [...new Set(titles)],
+      ...(taskDate ? { task_date: taskDate } : {})
     }
   }
 
@@ -605,6 +652,23 @@ export default class NLU {
       }
 
       if (skillName === 'personal_agenda_skill') {
+        const taskArguments = this.getTaskArguments(utterance)
+        const normalizedUtterance = this.normalizeFrenchUtterance(utterance)
+        const isTaskRequest =
+          normalizedUtterance.includes('tache') ||
+          normalizedUtterance.includes('a faire') ||
+          normalizedUtterance.includes('prevois') ||
+          normalizedUtterance.includes('prevoit') ||
+          normalizedUtterance.includes('prevu')
+
+        if (isTaskRequest && taskArguments) {
+          return [{
+            status: ActionCallingStatus.Success,
+            name: 'create_task',
+            arguments: taskArguments
+          }]
+        }
+
         const agendaArguments = this.getAgendaArguments(utterance)
         if (agendaArguments) {
           return [{

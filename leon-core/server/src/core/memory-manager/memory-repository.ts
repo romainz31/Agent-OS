@@ -522,6 +522,42 @@ export default class MemoryRepository {
     }))
   }
 
+  public listMemoryItems(options: {
+    scopes?: MemoryScope[]
+    kinds?: MemoryRecord['kind'][]
+    limit?: number
+  } = {}): MemoryRecord[] {
+    const db = this.ensureDb()
+    const clauses = ['is_deleted = 0']
+    const parameters: Array<string | number> = []
+
+    if (options.scopes && options.scopes.length > 0) {
+      clauses.push(`scope IN (${options.scopes.map(() => '?').join(',')})`)
+      parameters.push(...options.scopes)
+    }
+
+    if (options.kinds && options.kinds.length > 0) {
+      clauses.push(`kind IN (${options.kinds.map(() => '?').join(',')})`)
+      parameters.push(...options.kinds)
+    }
+
+    const requestedLimit = Math.floor(options.limit ?? 200)
+    const limit = Math.min(Math.max(requestedLimit, 1), 1_000)
+    parameters.push(limit)
+
+    const rows = db
+      .prepare(
+        `SELECT *
+         FROM memory_items
+         WHERE ${clauses.join(' AND ')}
+         ORDER BY updated_at DESC
+         LIMIT ?`
+      )
+      .all(...parameters)
+
+    return rows.map((row) => mapMemoryRow(row as Record<string, unknown>))
+  }
+
   public softDeleteById(id: string): boolean {
     const db = this.ensureDb()
     const result = db

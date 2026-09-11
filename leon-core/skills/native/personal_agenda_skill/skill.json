@@ -2,7 +2,7 @@
   "$schema": "../../../schemas/skill-schemas/skill.json",
   "name": "Personal Agenda",
   "icon_name": "calendar-event-line",
-  "bridge": "python",
+  "bridge": "nodejs",
   "version": "1.0.0",
   "description": "Save personal events and appointments with their dates.",
   "author": {
@@ -27,6 +27,24 @@
         }
       },
       "optional_parameters": ["event_time"]
+    },
+    "create_task": {
+      "type": "logic",
+      "description": "Create one or more personal tasks, optionally scheduled for a specific date.",
+      "parameters": {
+        "task_titles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The task titles to add to the personal task list."
+        },
+        "task_date": {
+          "type": "string",
+          "description": "The optional task date in ISO format YYYY-MM-DD."
+        }
+      },
+      "optional_parameters": ["task_date"]
     }
   }
 }

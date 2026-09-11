@@ -14,7 +14,9 @@ import QMDBackend from './qmd-backend'
 import { buildDailyMarkdownSummary } from './summarizer'
 import type {
   KnowledgeNamespace,
+  MemoryKind,
   MemoryRecord,
+  MemoryScope,
   MemoryWriteInput,
   RecallHit,
   RecallQuery,
@@ -747,6 +749,18 @@ export default class MemoryManager {
       confidence: 0.95,
       metadata
     })
+  }
+
+  public async listRecords(options: {
+    scopes?: MemoryScope[]
+    kinds?: MemoryKind[]
+    limit?: number
+  } = {}): Promise<MemoryRecord[]> {
+    if (!this._isLoaded) {
+      await this.load()
+    }
+
+    return this.repository.listMemoryItems(options)
   }
 
   public async forgetById(id: string): Promise<boolean> {

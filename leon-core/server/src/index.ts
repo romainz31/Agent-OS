@@ -34,6 +34,7 @@ import {
   PYTHON_TCP_CLIENT,
   HTTP_SERVER,
   SOCKET_SERVER,
+  BRAIN,
   LLM_PROVIDER,
   LLM_MANAGER,
   TOOLKIT_REGISTRY,
@@ -72,6 +73,8 @@ async function listRunningProcesses(): Promise<
 }
 
 async function bootstrap(): Promise<void> {
+  BRAIN.lang = LangHelper.getShortCode(LEON_LANG)
+
   // Scope process replacement to one profile so separate Leon workers can
   // share a runtime without terminating each other during startup.
   process.title = `leon-${LEON_PROFILE_NAME}`

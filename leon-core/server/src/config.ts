@@ -347,7 +347,7 @@ class ConfigManager {
         throw new Error('The root value must be a YAML object.')
       }
 
-      if (parsedConfig['language'] === 'en-US') {
+      if (parsedConfig['language'] === 'en-US' || parsedConfig['language'] === 'en') {
         parsedConfig['language'] = 'fr-FR'
       }
 
