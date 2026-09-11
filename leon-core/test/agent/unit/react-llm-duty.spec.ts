@@ -241,7 +241,7 @@ describe('continuous agent loop', () => {
     })
 
     expect(result.intent).toBe('answer')
-    expect(result.answer).toContain('Romain lives in Brens')
+    expect(result.answer).toContain('Romain habite à Brens')
     expect(callModel.mock.calls.some((call) => call[2]?.isCompletionReview)).toBe(false)
   })
 
