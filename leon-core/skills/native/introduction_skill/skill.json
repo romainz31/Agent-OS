@@ -33,6 +33,20 @@
     "get_owner": {
       "type": "logic",
       "description": "Answer questions asking for the owner's saved name or basic profile information, such as 'what is my name?'."
+    },
+    "remember_relationship": {
+      "type": "logic",
+      "description": "Save a relationship explicitly stated by the owner, such as 'my girlfriend is Coralie'. Do not use this for the owner's own name.",
+      "parameters": {
+        "partner_name": {
+          "type": "string",
+          "description": "The partner's name."
+        }
+      }
+    },
+    "get_relationship": {
+      "type": "logic",
+      "description": "Answer questions asking who the owner's partner is, such as 'who is my girlfriend?'."
     }
   }
 }

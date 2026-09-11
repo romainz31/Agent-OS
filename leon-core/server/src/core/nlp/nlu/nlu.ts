@@ -383,6 +383,37 @@ export default class NLU {
           }]
         }
 
+        if (
+          normalizedUtterance.includes('qui est ma copine') ||
+          normalizedUtterance.includes('qui est mon copain') ||
+          normalizedUtterance.includes('qui est ma partenaire') ||
+          normalizedUtterance.includes('qui est mon partenaire')
+        ) {
+          return [{
+            status: ActionCallingStatus.Success,
+            name: 'get_relationship',
+            arguments: {}
+          }]
+        }
+
+        const relationshipStatement = /^(?:ma copine|mon copain|ma partenaire|mon partenaire|ma femme|mon mari)\s+est\s+(.+)$/i.exec(
+          utterance.trim()
+        )
+
+        if (relationshipStatement?.[1]) {
+          const partnerName = relationshipStatement[1]
+            .replace(/[.!?]+$/, '')
+            .trim()
+
+          if (partnerName) {
+            return [{
+              status: ActionCallingStatus.Success,
+              name: 'remember_relationship',
+              arguments: { partner_name: partnerName }
+            }]
+          }
+        }
+
         const isRememberRequest =
           normalizedUtterance.includes('je m\'appelle') ||
           normalizedUtterance.includes('mon nom') ||

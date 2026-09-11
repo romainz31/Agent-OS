@@ -47,6 +47,25 @@
           "I don't know your name yet."
         ]
       }
+    },
+    "remember_relationship": {
+      "answers": {
+        "relationship_remembered": [
+          "Okay, I'll remember that {{ partner_name }} is your girlfriend.",
+          "Got it: your girlfriend's name is {{ partner_name }}."
+        ]
+      }
+    },
+    "get_relationship": {
+      "answers": {
+        "relationship_known": [
+          "Your girlfriend's name is {{ partner_name }}.",
+          "You told me your girlfriend's name is {{ partner_name }}."
+        ],
+        "relationship_unknown": [
+          "I don't know your girlfriend's name yet."
+        ]
+      }
     }
   }
 }

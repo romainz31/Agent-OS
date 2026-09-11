@@ -47,6 +47,25 @@
           "Je ne connais pas encore ton prénom."
         ]
       }
+    },
+    "remember_relationship": {
+      "answers": {
+        "relationship_remembered": [
+          "D'accord, je retiens que {{ partner_name }} est ta copine.",
+          "C'est noté : ta copine s'appelle {{ partner_name }}."
+        ]
+      }
+    },
+    "get_relationship": {
+      "answers": {
+        "relationship_known": [
+          "Ta copine s'appelle {{ partner_name }}.",
+          "Tu m'as dit que ta copine s'appelle {{ partner_name }}."
+        ],
+        "relationship_unknown": [
+          "Je ne connais pas encore le prénom de ta copine."
+        ]
+      }
     }
   }
 }

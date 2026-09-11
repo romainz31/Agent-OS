@@ -5,6 +5,7 @@ from typing import TypedDict, Union
 class Owner(TypedDict, total=False):
     name: str
     birth_date: str
+    partner_name: str
 
 
 owner_memory = Memory({'name': 'owner', 'default_memory': None})
