@@ -6,6 +6,7 @@ class Owner(TypedDict, total=False):
     name: str
     birth_date: str
     location: str
+    work: str
     partner_name: str
 
 

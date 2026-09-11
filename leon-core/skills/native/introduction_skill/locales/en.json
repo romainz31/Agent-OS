@@ -29,6 +29,18 @@
         "remembered_with_location": [
           "I'll remember that your name is {{ owner_name }} and that you live in {{ owner_location }}.",
           "Got it: {{ owner_name }}, you live in {{ owner_location }}."
+        ],
+        "remembered_location": [
+          "Got it: you live in {{ owner_location }}."
+        ],
+        "remembered_work": [
+          "Got it: you work at {{ owner_work }}."
+        ],
+        "remembered_with_work": [
+          "Got it: {{ owner_name }}, you work at {{ owner_work }}."
+        ],
+        "remembered_with_location_and_work": [
+          "Got it: your name is {{ owner_name }}, you live in {{ owner_location }}, and you work at {{ owner_work }}."
         ]
       },
       "missing_param_follow_ups": {
@@ -51,8 +63,17 @@
           "Your name is {{ owner_name }} and you live in {{ owner_location }}.",
           "You are {{ owner_name }} and you live in {{ owner_location }}."
         ],
+        "owner_known_with_location_and_work": [
+          "Your name is {{ owner_name }}, you live in {{ owner_location }}, and you work at {{ owner_work }}."
+        ],
+        "owner_known_with_work": [
+          "Your name is {{ owner_name }} and you work at {{ owner_work }}."
+        ],
         "owner_location_known": [
           "You live in {{ owner_location }}."
+        ],
+        "owner_work_known": [
+          "You work at {{ owner_work }}."
         ],
         "owner_unknown": [
           "I don't know your name yet."

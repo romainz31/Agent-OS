@@ -17,7 +17,7 @@
     },
     "remember": {
       "type": "logic",
-      "description": "Save a newly stated owner's name or birth date. Do not use this action for questions asking what the saved name is.",
+      "description": "Save a newly stated owner's name, birth date, location, or current work. Do not use this action for questions asking what is already saved.",
       "parameters": {
         "owner_name": {
           "type": "string",
@@ -30,13 +30,17 @@
         "owner_location": {
           "type": "string",
           "description": "The owner's town or home location."
+        },
+        "owner_work": {
+          "type": "string",
+          "description": "The owner's workplace or current job."
         }
       },
-      "optional_parameters": ["owner_name", "owner_birth_date", "owner_location"]
+      "optional_parameters": ["owner_name", "owner_birth_date", "owner_location", "owner_work"]
     },
     "get_owner": {
       "type": "logic",
-      "description": "Answer questions asking for the owner's saved name or basic profile information, such as 'what is my name?'."
+      "description": "Answer questions asking for the owner's saved name, location, or work, such as 'what is my name?' or 'where do I work?'."
     },
     "remember_relationship": {
       "type": "logic",

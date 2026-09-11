@@ -314,6 +314,12 @@ export default class NLU {
       normalizedUtterance.includes('j\'habite') ||
       normalizedUtterance.includes('ma copine est') ||
       normalizedUtterance.includes('mon copain est') ||
+      normalizedUtterance.includes('je travaille') ||
+      normalizedUtterance.includes('je bosse') ||
+      normalizedUtterance.includes('mon travail') ||
+      /^(?:c['’]?est\s+)?[a-zà-ÿ' -]+\s+dans\s+(?:le|la)\s+[a-zà-ÿ' -]+$/i.test(
+        normalizedUtterance
+      ) ||
       normalizedUtterance.includes('qui est ma copine') ||
       normalizedUtterance.includes('qui est mon copain') ||
       normalizedUtterance.includes('qui est ma partenaire') ||
@@ -376,6 +382,29 @@ export default class NLU {
         owner_location: locationStatement[1]
           .replace(/[.,!?]+$/, '')
           .trim()
+      }
+    }
+
+    const workStatement = /^je\s+(?:travaille|bosse)\s+(?:(?:a|à|chez|dans)\s+)?(.+)$/i.exec(
+      utterance.trim()
+    )
+
+    if (workStatement?.[1]) {
+      return {
+        owner_work: workStatement[1].replace(/[.,!?]+$/, '').trim()
+      }
+    }
+
+    // Accept a short correction such as "Brens dans le Tarn" after the
+    // owner has already stated their name or town. Do not treat work phrases
+    // such as "je travaille dans le Tarn" as a location correction.
+    const locationClarification = /^(?!je\s+(?:travaille|bosse)\b)(?:c['’]?est\s+)?(.+?)\s+dans\s+(?:le|la)\s+(.+)$/i.exec(
+      utterance.trim()
+    )
+
+    if (locationClarification?.[1] && locationClarification[2]) {
+      return {
+        owner_location: `${locationClarification[1].replace(/[.,!?]+$/, '').trim()}, ${locationClarification[2].replace(/[.,!?]+$/, '').trim()}`
       }
     }
 
@@ -591,7 +620,9 @@ export default class NLU {
           normalizedUtterance.includes('comment je mapelle') ||
           normalizedUtterance.includes('quel est mon nom') ||
           normalizedUtterance.includes('qui suis-je') ||
-          normalizedUtterance.includes('ou j\'habite')
+          normalizedUtterance.includes('ou j\'habite') ||
+          normalizedUtterance.includes('ou je travaille') ||
+          normalizedUtterance.includes('quel est mon travail')
         ) {
           return [{
             status: ActionCallingStatus.Success,

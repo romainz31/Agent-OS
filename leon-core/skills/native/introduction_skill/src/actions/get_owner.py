@@ -8,6 +8,37 @@ def run(params: ActionParams) -> None:
     owner = memory.get_owner()
     owner_name = owner.get('name') if owner else None
     owner_location = owner.get('location') if owner else None
+    owner_work = owner.get('work') if owner else None
+
+    if (
+        isinstance(owner_name, str)
+        and owner_name.strip()
+        and isinstance(owner_location, str)
+        and owner_location.strip()
+        and isinstance(owner_work, str)
+        and owner_work.strip()
+    ):
+        leon.answer({
+            'key': 'owner_known_with_location_and_work',
+            'data': {
+                'owner_name': owner_name,
+                'owner_location': owner_location,
+                'owner_work': owner_work
+            }
+        })
+        return
+
+    if (
+        isinstance(owner_name, str)
+        and owner_name.strip()
+        and isinstance(owner_work, str)
+        and owner_work.strip()
+    ):
+        leon.answer({
+            'key': 'owner_known_with_work',
+            'data': {'owner_name': owner_name, 'owner_work': owner_work}
+        })
+        return
 
     if (
         isinstance(owner_name, str)
@@ -36,6 +67,10 @@ def run(params: ActionParams) -> None:
             'key': 'owner_location_known',
             'data': {'owner_location': owner_location}
         })
+        return
+
+    if isinstance(owner_work, str) and owner_work.strip():
+        leon.answer({'key': 'owner_work_known', 'data': {'owner_work': owner_work}})
         return
 
     if not isinstance(owner_name, str) or not owner_name.strip():

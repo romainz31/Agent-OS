@@ -363,8 +363,15 @@ export class LogicActionSkillHandler {
 
             SOCKET_SERVER.emitAnswerToChatClients(answerData)
           } else {
+            // Profile and agenda answers are already curated by their native
+            // locale files. Sending them through the paraphraser can change
+            // the language, alter saved values, or invent context.
+            const isDeterministicPersonalSkill =
+              skillAnswer.skill === 'introduction_skill' ||
+              skillAnswer.skill === 'personal_agenda_skill'
             const shouldSkipParaphrase =
-              skillAnswer.output.codes.includes('error')
+              skillAnswer.output.codes.includes('error') ||
+              isDeterministicPersonalSkill
             const queuedAnswer =
               typeof answer === 'string'
                 ? {
