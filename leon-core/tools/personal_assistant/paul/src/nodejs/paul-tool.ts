@@ -151,6 +151,57 @@ export default class PaulTool extends Tool {
   }
 
   public async getContext(): Promise<Record<string, unknown>> {
-    return { success: true, context: this.service.getContextPack() }
+    const context = this.service.getContextPack()
+
+    return {
+      success: true,
+      context: {
+        today: context.today,
+        profile: {
+          facts: context.profile.facts.map((fact) => ({
+            subject: fact.subject,
+            predicate: fact.predicate,
+            value: fact.value
+          })),
+          relationships: context.profile.relationships.map((relationship) => ({
+            subject: relationship.subject,
+            relation: relationship.relation,
+            object: relationship.object
+          }))
+        },
+        agenda: context.agenda.slice(0, 50).map((item) => ({
+          kind: item.kind,
+          title: item.title,
+          startAt: item.startAt,
+          dueAt: item.dueAt,
+          status: item.status,
+          relatedPerson: item.relatedPerson
+        })),
+        recentActivities: context.recentActivities.slice(0, 50).map((activity) => ({
+          occurredAt: activity.occurredAt,
+          action: activity.action,
+          object: activity.object,
+          location: activity.location
+        })),
+        recentMoods: context.recentMoods.slice(0, 20).map((mood) => ({
+          occurredAt: mood.occurredAt,
+          label: mood.label,
+          note: mood.note
+        })),
+        pendingReminders: context.pendingReminders.slice(0, 20).map((item) => ({
+          title: item.title,
+          dueAt: item.dueAt,
+          status: item.status
+        })),
+        previousContext: context.previousContext
+          ? {
+              lastIntent: context.previousContext.lastIntent,
+              lastDateRange: context.previousContext.lastDateRange,
+              lastEntity: context.previousContext.lastEntity,
+              lastQuery: context.previousContext.lastQuery
+            }
+          : null
+      }
+    }
   }
 }
