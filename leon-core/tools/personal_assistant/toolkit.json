@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schemas/toolkit-schemas/toolkit.json",
+  "name": "Personal Assistant",
+  "description": "Paul's structured personal memory, journal, agenda and life tracking tools.",
+  "progressive_guidance": "Use Paul for durable personal facts, relationships, dated agenda items, completed activities, counts, mood and habits. Do not guess exact dates or counts from chat history when Paul can query them.",
+  "icon_name": "heart-3-line",
+  "context_files": [
+    "OWNER.md",
+    "HABITS.md"
+  ],
+  "tools": [
+    "paul"
+  ]
+}

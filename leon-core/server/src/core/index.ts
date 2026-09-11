@@ -22,6 +22,9 @@ import ContextManager from '@/core/context-manager'
 import MemoryManager from '@/core/memory-manager'
 import SelfModelManager from '@/core/self-model-manager'
 import PulseManager from '@/core/pulse-manager'
+import PaulService from '@/core/paul/paul-service'
+import PaulScheduler from '@/core/paul/paul-scheduler'
+import PaulTelegramBot from '@/core/paul/paul-telegram'
 import PostTurnMaintenanceQueue from '@/core/post-turn-maintenance-queue'
 import ToolExecutor from '@/core/tool-executor'
 import { ToolWorkerManager } from '@/core/tool-worker-manager'
@@ -112,6 +115,18 @@ export const SELF_MODEL_MANAGER = createProfileServiceProxy(
 export const PULSE_MANAGER = createProfileServiceProxy(
   'pulse-manager',
   () => new PulseManager()
+)
+export const PAUL_SERVICE = createProfileServiceProxy(
+  'paul-service',
+  () => new PaulService()
+)
+export const PAUL_SCHEDULER = createProfileServiceProxy(
+  'paul-scheduler',
+  () => new PaulScheduler()
+)
+export const PAUL_TELEGRAM = createProfileServiceProxy(
+  'paul-telegram',
+  () => new PaulTelegramBot()
 )
 export const POST_TURN_MAINTENANCE_QUEUE = createProfileServiceProxy(
   'post-turn-maintenance-queue',

@@ -28,6 +28,7 @@ import { sessionsPlugin } from '@/core/http-server/api/sessions'
 import { openPathPlugin } from '@/core/http-server/api/open-path'
 import { fileSystemListPlugin } from '@/core/http-server/api/file-system-list'
 import { extensionFilesPlugin } from '@/core/http-server/api/extension-files'
+import { paulPlugin } from '@/core/http-server/api/paul'
 import {
   authenticateProfileHTTPRequest,
   profileAuthRoutes
@@ -201,6 +202,7 @@ export default class HTTPServer {
     this.fastify.register(openPathPlugin, { apiVersion: API_VERSION })
     this.fastify.register(fileSystemListPlugin, { apiVersion: API_VERSION })
     this.fastify.register(extensionFilesPlugin, { apiVersion: API_VERSION })
+    this.fastify.register(paulPlugin, { apiVersion: API_VERSION })
     await registerHTTPPlugins(this.fastify, { apiVersion: API_VERSION })
 
     try {

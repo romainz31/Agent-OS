@@ -28,6 +28,20 @@ const SERVER_MEMORY_SQL_DESTINATION_PATH = path.join(
   'memory-manager',
   'sql'
 )
+const SERVER_PAUL_SQL_SOURCE_PATH = path.join(
+  process.cwd(),
+  'server',
+  'src',
+  'core',
+  'paul',
+  'sql'
+)
+const SERVER_PAUL_SQL_DESTINATION_PATH = path.join(
+  SERVER_DIST_PATH,
+  'core',
+  'paul',
+  'sql'
+)
 
 function isMoveFallbackError(error) {
   return (
@@ -144,9 +158,20 @@ async function copyRuntimeAssets() {
   await fs.promises.mkdir(SERVER_MEMORY_SQL_DESTINATION_PATH, {
     recursive: true
   })
+  await fs.promises.mkdir(SERVER_PAUL_SQL_DESTINATION_PATH, {
+    recursive: true
+  })
   await fs.promises.cp(
     SERVER_MEMORY_SQL_SOURCE_PATH,
     SERVER_MEMORY_SQL_DESTINATION_PATH,
+    {
+      recursive: true,
+      force: true
+    }
+  )
+  await fs.promises.cp(
+    SERVER_PAUL_SQL_SOURCE_PATH,
+    SERVER_PAUL_SQL_DESTINATION_PATH,
     {
       recursive: true,
       force: true

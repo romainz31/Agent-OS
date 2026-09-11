@@ -139,6 +139,10 @@ For now:
 - use [`core/context/ARCHITECTURE.md`](./core/context/ARCHITECTURE.md) for the current architecture overview
 - expect the public docs site to lag behind the new core until the updated documentation is published
 
+### Paul personal-assistant layer
+
+This branch includes the local-first Paul layer for structured personal memory, dated agenda items, exact activity counts, optional Letta continuity and an opt-in Telegram adapter. See [`docs/PAUL.md`](./docs/PAUL.md) for setup and API details.
+
 ## ❤️ Contributing
 
 We are starting to progressively onboard contributors for the **2.0 Developer Preview**.

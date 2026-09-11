@@ -17,6 +17,7 @@ declare module 'better-sqlite3' {
   export interface Database {
     exec(sql: string): void
     prepare(sql: string): Statement
+    pragma(source: string, options?: Record<string, unknown>): unknown
     close(): void
   }
 

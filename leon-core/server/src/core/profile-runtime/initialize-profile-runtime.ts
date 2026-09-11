@@ -6,8 +6,11 @@ import { CONFIG_STATE } from '@/core/config-states/config-state'
  */
 export async function ensureActiveProfileRuntime(): Promise<void> {
   await PROFILE_RUNTIME_MANAGER.ensureInitialized(async () => {
-    const { LLM_MANAGER, LLM_PROVIDER, PULSE_MANAGER } = await import('@/core')
+    const { LLM_MANAGER, LLM_PROVIDER, PULSE_MANAGER, PAUL_SERVICE, PAUL_SCHEDULER, PAUL_TELEGRAM } = await import('@/core')
     PULSE_MANAGER.start()
+    PAUL_SERVICE.initialize()
+    PAUL_SCHEDULER.start()
+    PAUL_TELEGRAM.start()
     const hasEnabledTarget = CONFIG_STATE.getModelState().hasEnabledTarget()
 
     if (!hasEnabledTarget) {
