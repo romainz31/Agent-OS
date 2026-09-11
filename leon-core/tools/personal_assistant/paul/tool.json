@@ -38,7 +38,7 @@
       }
     },
     "recordActivity": {
-      "description": "Record one completed activity. Every distinct action must be recorded separately so Paul can count it later.",
+      "description": "MANDATORY for every completed personal action. Record one activity only. If the owner lists several completed actions, call this function once per distinct action so Paul can answer exact last-time and count questions. Resolve relative dates such as hier, aujourd'hui and demain in occurredAt. Do not use saveFact, Context or OWNER.md for activities.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -97,7 +97,7 @@
       }
     },
     "queryActivities": {
-      "description": "Find completed activities in an exact date range, optionally filtered by action or object.",
+      "description": "MANDATORY for questions about when a completed activity happened, the last time it happened, or activities during a date range. Use this instead of Structured Knowledge, Context Search or OWNER.md. For 'quand est-ce que j'ai nettoyé les toilettes pour la dernière fois ?', use dateExpression 'ce mois-ci' or another relevant past range and object 'toilettes'.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -110,7 +110,7 @@
       }
     },
     "countActivities": {
-      "description": "Count completed activities exactly from the structured journal.",
+      "description": "MANDATORY for exact counts of completed activities. Query Paul's structured journal; never count from conversation text, Context files or OWNER.md.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -152,7 +152,7 @@
       }
     },
     "getContext": {
-      "description": "Return a compact Paul context pack for the current day.",
+      "description": "Return a compact summary of Paul's personal facts, relationships and current context. Use for broad questions such as 'qu'est-ce que tu sais sur moi ?'. Do not use this instead of queryActivities for exact activity/date questions.",
       "parameters": {
         "type": "object",
         "properties": {},
