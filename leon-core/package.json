@@ -124,6 +124,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@stylistic/eslint-plugin": "5.10.0",
+    "@trycua/cua-driver": "0.28.0",
     "@tsconfig/node16": "16.1.8",
     "@tsconfig/strictest": "2.0.8",
     "@types/better-sqlite3": "7.6.13",
