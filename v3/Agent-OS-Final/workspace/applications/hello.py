@@ -1,1 +1,0 @@
-print("V4 GUI DEV OK")

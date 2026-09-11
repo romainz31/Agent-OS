@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-.venv/
-venv/
-.env
-data/*.json
-workspace/__pycache__/
-workspace/.agentos_build/
-workspace/dist/

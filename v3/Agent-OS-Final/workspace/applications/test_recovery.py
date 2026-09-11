@@ -1,1 +1,0 @@
-print("V3.6 recovery OK")

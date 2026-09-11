@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agent-OS V8 — Mission Control</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101217; --panel:#181c24; --line:#2a3140; --text:#edf2f7; --muted:#9ca8ba; --accent:#6ea8fe; --ok:#71d39a; --warn:#f2c879; }
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    header{padding:22px 26px;border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:center;justify-content:space-between}
+    h1{font-size:21px;margin:0} .sub{color:var(--muted);font-size:13px;margin-top:5px}.badge{padding:6px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:12px}
+    main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,.8fr);gap:18px;padding:18px;max-width:1500px;margin:auto}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}.panel h2{font-size:14px;margin:0;padding:14px 16px;border-bottom:1px solid var(--line)}
+    #chat{height:58vh;min-height:420px;overflow:auto;padding:16px}.msg{max-width:85%;padding:10px 12px;border-radius:12px;margin:8px 0;white-space:pre-wrap;line-height:1.45}.user{margin-left:auto;background:#263245}.paul{background:#202631;border:1px solid var(--line)}
+    .composer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}textarea{flex:1;resize:vertical;min-height:48px;max-height:160px;background:#11151c;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px}
+    button{background:#25334a;color:var(--text);border:1px solid #3a4a65;border-radius:9px;padding:9px 12px;cursor:pointer}button:hover{filter:brightness(1.12)}button.danger{background:#3b2327;border-color:#6a353c}
+    .stack{display:grid;gap:18px}.content{padding:12px 14px}.kv{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding:8px 0;font-size:13px}.kv:last-child{border:0}.muted{color:var(--muted)}.ok{color:var(--ok)}.warn{color:var(--warn)}
+    .mission{border:1px solid var(--line);border-radius:9px;padding:10px;margin:9px 0}.mission strong{font-size:13px}.mission small{color:var(--muted)}
+    @media(max-width:900px){main{grid-template-columns:1fr}#chat{height:52vh}}
+  </style>
+</head>
+<body>
+<header><div><h1>Agent-OS V8 · Paul</h1><div class="sub">Option C — Agent-OS au-dessus des moteurs éprouvés</div></div><span class="badge" id="live">connexion…</span></header>
+<main>
+  <section class="panel">
+    <h2>Conversation</h2>
+    <div id="chat"><div class="msg paul">V8 prête. Mémoire initiale vide. Écris « status » pour voir les moteurs disponibles.</div></div>
+    <div class="composer"><textarea id="input" placeholder="Parler à Paul…"></textarea><button id="send">Envoyer</button></div>
+  </section>
+  <aside class="stack">
+    <section class="panel"><h2>Système</h2><div class="content" id="system">Chargement…</div></section>
+    <section class="panel"><h2>Mission Control</h2><div class="content" id="missions">Aucune mission.</div></section>
+    <section class="panel"><h2>Maintenance</h2><div class="content"><button class="danger" id="reset">Remettre V8 à zéro</button><div class="sub">Efface mémoire, conversation, agenda et missions.</div></div></section>
+  </aside>
+</main>
+<script>
+const $=s=>document.querySelector(s), chat=$('#chat'), input=$('#input');
+function add(text,cls){const d=document.createElement('div');d.className='msg '+cls;d.textContent=text;chat.appendChild(d);chat.scrollTop=chat.scrollHeight}
+async function api(path,opt={}){const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opt});if(!r.ok)throw new Error(await r.text());return r.json()}
+function flag(v){return v?'<span class="ok">OK</span>':'<span class="warn">non</span>'}
+async function refresh(){try{const s=await api('/api/status');$('#live').textContent='V'+s.version;const i=s.integrations;$('#system').innerHTML=`<div class="kv"><span>Ollama</span>${flag(s.ollama.ok)}</div><div class="kv"><span>Mémoire</span><span>${s.memory_count}</span></div><div class="kv"><span>LangGraph</span>${flag(i.langgraph.ok)}</div><div class="kv"><span>MAF</span>${flag(i.maf.ok)}</div><div class="kv"><span>Agent Zero</span>${flag(i.agent_zero.configured)}</div><div class="kv"><span>OpenHands</span>${flag(i.openhands.configured)}</div>`;const m=await api('/api/missions');$('#missions').innerHTML=m.items.length?m.items.map(x=>`<div class="mission"><strong>${x.human_id} · ${x.status}</strong><br><small>${x.progress}/${x.total_steps} · ${x.title}</small></div>`).join(''):'<span class="muted">Aucune mission.</span>'}catch(e){$('#live').textContent='hors ligne'}}
+async function send(){const text=input.value.trim();if(!text)return;input.value='';add(text,'user');try{const r=await api('/api/chat',{method:'POST',body:JSON.stringify({message:text})});add(r.response,'paul');refresh()}catch(e){add('Erreur : '+e.message,'paul')}}
+$('#send').onclick=send;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+$('#reset').onclick=async()=>{if(!confirm('Vider toute la mémoire et les missions V8 ?'))return;await api('/api/reset',{method:'POST'});add('V8 remise à zéro.','paul');refresh()};
+refresh();setInterval(refresh,2500);
+</script>
+</body>
+</html>
