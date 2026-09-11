@@ -36,6 +36,17 @@
           "What's your birth date?"
         ]
       }
+    },
+    "get_owner": {
+      "answers": {
+        "owner_known": [
+          "Your name is {{ owner_name }}.",
+          "I have your name saved as {{ owner_name }}."
+        ],
+        "owner_unknown": [
+          "I don't know your name yet."
+        ]
+      }
     }
   }
 }

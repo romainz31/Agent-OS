@@ -2,7 +2,7 @@ from bridges.python.src.sdk.memory import Memory
 from typing import TypedDict, Union
 
 
-class Owner(TypedDict):
+class Owner(TypedDict, total=False):
     name: str
     birth_date: str
 

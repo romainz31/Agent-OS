@@ -27,7 +27,12 @@
           "type": "string",
           "description": "The owner's birth date as an ISO date or precise date string."
         }
-      }
+      },
+      "optional_parameters": ["owner_birth_date"]
+    },
+    "get_owner": {
+      "type": "logic",
+      "description": "Answer questions asking for the owner's saved name or basic profile information."
     }
   }
 }

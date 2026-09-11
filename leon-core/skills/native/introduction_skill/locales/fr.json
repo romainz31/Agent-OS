@@ -36,6 +36,17 @@
           "Quelle est ta date de naissance ?"
         ]
       }
+    },
+    "get_owner": {
+      "answers": {
+        "owner_known": [
+          "Tu t'appelles {{ owner_name }}.",
+          "Ton prénom est {{ owner_name }}."
+        ],
+        "owner_unknown": [
+          "Je ne connais pas encore ton prénom."
+        ]
+      }
     }
   }
 }
