@@ -1,0 +1,30 @@
+# Leon setup depends on native/binary packages whose install scripts must run
+dangerouslyAllowAllBuilds: true
+
+# Leon validates and rebuilds native packages for its managed Node.js runtime.
+# Restore package sources instead of trusting machine-global cached build output.
+sideEffectsCache: false
+
+# Fail early when the active Node.js version does not satisfy package engines
+engineStrict: true
+
+# Keep dependency versions pinned when adding packages
+saveExact: true
+
+# Do not let `pnpm run` auto-install dependencies before running scripts
+verifyDepsBeforeRun: false
+
+# Keep pnpm install output readable without cursor manipulation
+reporter: append-only
+
+# Always run install lifecycle scripts, even when dependencies are up to date
+optimisticRepeatInstall: false
+
+minimumReleaseAgeExclude:
+  - '@trycua/cua-driver-darwin-arm64@0.28.0'
+  - '@trycua/cua-driver-darwin-x64@0.28.0'
+  - '@trycua/cua-driver-linux-arm64-gnu@0.28.0'
+  - '@trycua/cua-driver-linux-x64-gnu@0.28.0'
+  - '@trycua/cua-driver-win32-arm64-msvc@0.28.0'
+  - '@trycua/cua-driver-win32-x64-msvc@0.28.0'
+  - '@trycua/cua-driver@0.28.0'

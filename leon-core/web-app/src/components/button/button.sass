@@ -1,0 +1,95 @@
+.button-icon-only.button-tone-default
+  color: var(--color-text)
+
+.button-icon-only.button-tone-muted
+  color: var(--color-text-secondary)
+
+.button
+  display: inline-flex
+  align-items: center
+  justify-content: center
+  gap: var(--space-sm)
+  box-sizing: border-box
+  border: 1px solid transparent
+  border-radius: var(--border-radius-lg)
+  color: var(--color-text-secondary)
+  font-weight: var(--font-weight-semi-bold)
+  text-decoration: none
+  transition: color var(--transition-duration-main) var(--transition-timing-main), background-color var(--transition-duration-main) var(--transition-timing-main), border-color var(--transition-duration-main) var(--transition-timing-main)
+
+  .button-icon
+    flex: 0 0 auto
+    font-weight: var(--font-weight-regular)
+    line-height: 1
+
+  .button-label
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  &.button-md
+    min-height: 34px
+    padding: 0 12px
+    font-size: var(--font-size-md)
+    line-height: var(--line-height-md)
+
+    &.button-icon-only
+      box-sizing: border-box
+      width: var(--button-md-icon-only-size)
+      height: var(--button-md-icon-only-size)
+      min-height: 0
+      padding: 8px
+
+  &.button-ghost:hover:not(:disabled):not([aria-disabled='true']),
+  &.button-secondary:hover:not(:disabled):not([aria-disabled='true'])
+    background-color: var(--color-surface-hover)
+    color: var(--color-text)
+
+  &.button-secondary
+    background-color: transparent
+    border-color: var(--color-border)
+
+  &.button-secondary:not(.button-icon-only)
+    color: var(--color-text)
+
+  &.button-ghost:active:not(:disabled):not([aria-disabled='true']),
+  &.button-secondary:active:not(:disabled):not([aria-disabled='true'])
+    background-color: var(--color-surface-active)
+    color: var(--color-text)
+
+  &.button-primary
+    background-color: var(--color-primary-button)
+    color: var(--color-primary-button-text)
+
+  &.button-primary:hover:not(:disabled):not([aria-disabled='true'])
+    background-color: var(--color-primary-button-hover)
+
+  &.button-primary:active:not(:disabled):not([aria-disabled='true'])
+    background-color: var(--color-primary-button-active)
+
+  &.button-primary:disabled,
+  &.button-primary[aria-disabled='true']
+    background-color: var(--color-primary-button-disabled)
+
+  &.button-danger
+    background-color: var(--color-danger)
+    color: var(--color-danger-contrast)
+
+  &.button-danger:hover:not(:disabled):not([aria-disabled='true'])
+    background-color: var(--color-danger-hover)
+
+  &.button-danger:active:not(:disabled):not([aria-disabled='true'])
+    background-color: var(--color-danger-pressed)
+
+  &:disabled
+    color: var(--color-text-disabled)
+
+    &:not([aria-busy='true'])
+      cursor: not-allowed !important
+
+  &[aria-disabled='true']
+    color: var(--color-text-disabled)
+
+    &:not([aria-busy='true'])
+      cursor: not-allowed !important
