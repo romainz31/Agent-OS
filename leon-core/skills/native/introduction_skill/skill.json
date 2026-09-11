@@ -1,2 +1,38 @@
-fatal: path 'leon-core/skills/native/introduction_skill/skill.json' exists, but not 'skills/native/introduction_skill/skill.json'
-hint: Did you mean 'HEAD:leon-core/skills/native/introduction_skill/skill.json' aka 'HEAD:./skills/native/introduction_skill/skill.json'?
+{
+  "$schema": "../../../schemas/skill-schemas/skill.json",
+  "name": "Introduction",
+  "icon_name": "user-smile-line",
+  "bridge": "python",
+  "version": "1.0.0",
+  "description": "Leon introduces himself and remembers basic information about you.",
+  "author": {
+    "name": "Louis Grenard",
+    "email": "louis@getleon.ai",
+    "url": "https://github.com/louistiti"
+  },
+  "actions": {
+    "introduce_leon": {
+      "type": "logic",
+      "description": "Introduce Leon and greet the owner."
+    },
+    "remember": {
+      "type": "logic",
+      "description": "Save a newly stated owner's name or birth date. Do not use this action for questions asking what the saved name is.",
+      "parameters": {
+        "owner_name": {
+          "type": "string",
+          "description": "The owner's preferred name."
+        },
+        "owner_birth_date": {
+          "type": "string",
+          "description": "The owner's birth date as an ISO date or precise date string."
+        }
+      },
+      "optional_parameters": ["owner_birth_date"]
+    },
+    "get_owner": {
+      "type": "logic",
+      "description": "Answer questions asking for the owner's saved name or basic profile information, such as 'what is my name?'."
+    }
+  }
+}
