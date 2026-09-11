@@ -917,3 +917,367 @@ textarea::-webkit-scrollbar-thumb {
     gap: 8px;
   }
 }
+
+/* Paul dashboard --------------------------------------------------------- */
+#paul-dashboard {
+  position: absolute;
+  z-index: 2;
+  inset: 0 0 auto;
+  height: 31%;
+  min-height: 220px;
+}
+
+#paul-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 1.5% 0 1%;
+}
+
+#paul-greeting {
+  color: var(--white-color);
+  font-size: clamp(1.4rem, 2vw, 2rem);
+  font-weight: 600;
+}
+
+#paul-date {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 0.9rem;
+  text-transform: capitalize;
+}
+
+#paul-clock {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.72);
+  font-variant-numeric: tabular-nums;
+  font-size: 1rem;
+}
+
+#paul-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid rgba(0, 230, 118, 0.24);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+#paul-status span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #00e676;
+  box-shadow: 0 0 10px rgba(0, 230, 118, 0.85);
+}
+
+#paul-status.paul-status--error {
+  border-color: rgba(237, 41, 122, 0.35);
+}
+
+#paul-status.paul-status--error span {
+  background: var(--pink-color);
+  box-shadow: 0 0 10px rgba(237, 41, 122, 0.85);
+}
+
+#paul-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.35fr);
+  gap: 12px;
+  height: calc(100% - 62px);
+}
+
+.paul-card {
+  min-width: 0;
+  padding: 13px 15px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(34, 36, 38, 0.96), rgba(17, 19, 21, 0.9));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+}
+
+.paul-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.paul-eyebrow {
+  color: #79b7ff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.paul-card h2 {
+  margin-top: 3px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.paul-card-heading button {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.paul-card-heading button:hover {
+  background: rgba(28, 117, 219, 0.18);
+  color: #9acaff;
+}
+
+.paul-list,
+.paul-week-list {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.paul-list {
+  max-height: calc(100% - 52px);
+}
+
+.paul-week-list {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(92px, 1fr));
+  gap: 6px;
+  height: calc(100% - 52px);
+}
+
+.paul-agenda-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.paul-agenda-row + .paul-agenda-row {
+  margin-top: 5px;
+}
+
+.paul-agenda-row > i {
+  flex: 0 0 auto;
+  color: #79b7ff;
+  font-size: 1rem;
+}
+
+.paul-agenda-content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.paul-agenda-content strong {
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paul-agenda-content span {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.69rem;
+}
+
+.paul-complete-button {
+  width: 23px;
+  height: 23px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.46);
+  cursor: pointer;
+}
+
+.paul-complete-button:hover {
+  border-color: #00e676;
+  color: #00e676;
+}
+
+.paul-agenda-row--completed {
+  opacity: 0.46;
+  text-decoration: line-through;
+}
+
+.paul-day {
+  min-width: 0;
+  padding: 7px 5px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.paul-day--today {
+  background: rgba(28, 117, 219, 0.13);
+  outline: 1px solid rgba(28, 117, 219, 0.25);
+}
+
+.paul-day h3 {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  margin: 0 3px 5px;
+  color: rgba(255, 255, 255, 0.73);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.paul-day h3 span {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.paul-agenda-row--compact {
+  display: block;
+  min-height: 0;
+  padding: 5px;
+}
+
+.paul-agenda-row--compact > i,
+.paul-agenda-row--compact .paul-complete-button {
+  display: none;
+}
+
+.paul-agenda-row--compact .paul-agenda-content span {
+  display: none;
+}
+
+.paul-agenda-row--compact .paul-agenda-content strong {
+  display: block;
+  font-size: 0.68rem;
+}
+
+.paul-empty,
+.paul-day-empty,
+.paul-more {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.paul-day-empty {
+  margin: 8px 3px;
+  font-size: 0.68rem;
+}
+
+.paul-more {
+  margin-top: 7px;
+  text-align: right;
+}
+
+#top-container {
+  top: 32.5%;
+}
+
+#feed {
+  top: 36%;
+  height: 43%;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.bubble {
+  font-size: 1.08rem;
+  line-height: 1.5rem;
+}
+
+#is-typing {
+  top: 80%;
+}
+
+#input-container {
+  bottom: 8%;
+}
+
+#footer {
+  bottom: 1%;
+}
+
+@media (max-width: 1200px) {
+  #paul-week-list {
+    grid-template-columns: repeat(4, minmax(90px, 1fr));
+  }
+
+  #paul-dashboard {
+    height: 36%;
+  }
+
+  #top-container {
+    top: 37.5%;
+  }
+
+  #feed {
+    top: 41%;
+    height: 38%;
+  }
+
+  #is-typing {
+    top: 80%;
+  }
+}
+
+@media (max-width: 940px) {
+  #paul-dashboard {
+    position: relative;
+    height: auto;
+    min-height: 0;
+  }
+
+  #paul-header {
+    padding-top: 0;
+  }
+
+  #paul-overview {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .paul-card {
+    min-height: 165px;
+  }
+
+  #paul-week-list {
+    grid-template-columns: repeat(4, minmax(85px, 1fr));
+    height: auto;
+  }
+
+  #top-container,
+  #feed,
+  #is-typing,
+  #input-container {
+    position: relative;
+    top: auto;
+    bottom: auto;
+  }
+
+  #top-container {
+    margin-top: 16px;
+  }
+
+  #feed {
+    height: 320px;
+    margin-top: 10px;
+  }
+
+  #is-typing {
+    height: 22px;
+    margin-top: 8px;
+  }
+
+  #input-container {
+    margin-top: 8px;
+  }
+}
