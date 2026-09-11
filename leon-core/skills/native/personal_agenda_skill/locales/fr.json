@@ -1,0 +1,13 @@
+{
+  "$schema": "../../../schemas/skill-schemas/skill-locale-config.json",
+  "actions": {
+    "create_event": {
+      "answers": {
+        "event_created": [
+          "C'est noté pour le {{ date }} : {{ title }}{{ time_suffix }}.",
+          "D'accord, j'ajoute à ton agenda du {{ date }} : {{ title }}{{ time_suffix }}."
+        ]
+      }
+    }
+  }
+}

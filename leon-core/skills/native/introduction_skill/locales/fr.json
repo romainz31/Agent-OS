@@ -25,6 +25,10 @@
         "remembered": [
           "Je vais retenir que tu t'appelles {{ owner_name }}.",
           "D'accord, je retiens que tu t'appelles {{ owner_name }}."
+        ],
+        "remembered_with_location": [
+          "D'accord, je retiens que tu t'appelles {{ owner_name }} et que tu habites à {{ owner_location }}.",
+          "C'est noté : {{ owner_name }}, tu habites à {{ owner_location }}."
         ]
       },
       "missing_param_follow_ups": {
@@ -42,6 +46,13 @@
         "owner_known": [
           "Tu t'appelles {{ owner_name }}.",
           "Ton prénom est {{ owner_name }}."
+        ],
+        "owner_known_with_location": [
+          "Tu t'appelles {{ owner_name }} et tu habites à {{ owner_location }}.",
+          "Tu es {{ owner_name }} et tu vis à {{ owner_location }}."
+        ],
+        "owner_location_known": [
+          "Tu habites à {{ owner_location }}."
         ],
         "owner_unknown": [
           "Je ne connais pas encore ton prénom."

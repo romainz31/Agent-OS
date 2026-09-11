@@ -290,11 +290,185 @@ export default class NLU {
     })
   }
 
+  private normalizeFrenchUtterance(utterance: NLPUtterance): string {
+    return utterance
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[’]/g, '\'')
+      .replace(/m['’]?app?elle/g, 'mapelle')
+      .toLowerCase()
+      .trim()
+  }
+
+  private getDeterministicSkill(
+    utterance: NLPUtterance
+  ): NLPSkill | null {
+    const normalizedUtterance = this.normalizeFrenchUtterance(utterance)
+
+    const isProfileUtterance =
+      normalizedUtterance.includes('comment je mapelle') ||
+      normalizedUtterance.includes('quel est mon nom') ||
+      normalizedUtterance.includes('qui suis-je') ||
+      normalizedUtterance.includes('je mapelle') ||
+      normalizedUtterance.includes('jhabite') ||
+      normalizedUtterance.includes('j\'habite') ||
+      normalizedUtterance.includes('ma copine est') ||
+      normalizedUtterance.includes('mon copain est') ||
+      normalizedUtterance.includes('qui est ma copine') ||
+      normalizedUtterance.includes('qui est mon copain') ||
+      normalizedUtterance.includes('qui est ma partenaire') ||
+      normalizedUtterance.includes('qui est mon partenaire') ||
+      /\bje suis\s+\S+\s+et\s+j'?habite\b/.test(normalizedUtterance)
+
+    if (isProfileUtterance) {
+      return 'introduction_skill'
+    }
+
+    const hasDateReference =
+      /\b(demain|apres-demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/.test(
+        normalizedUtterance
+      )
+    const hasPlanIntent =
+      /\b(dois|doit|faut|prevois|prevu|rendez-vous|rdv|aller chercher|emmener|recuperer)\b/.test(
+        normalizedUtterance
+      )
+
+    if (hasDateReference && hasPlanIntent) {
+      return 'personal_agenda_skill'
+    }
+
+    return null
+  }
+
+  private getOwnerMemoryArguments(
+    utterance: NLPUtterance
+  ): Record<string, string> | null {
+    const identityStatement = /^(?:(?:salut|bonjour|bonsoir)[,\s]+)?(?:je\s+(?:m['’]?app?elle|mapelle)|je\s+suis)\s+(.+?)(?:\s+et\s+j['’]?habite\s+(?:a|à)\s+(.+))?$/i.exec(
+      utterance.trim()
+    )
+
+    if (identityStatement?.[1]) {
+      const ownerName = identityStatement[1]
+        .replace(/[.,!?]+$/, '')
+        .trim()
+      const ownerLocation = identityStatement[2]
+        ?.replace(/[.,!?]+$/, '')
+        .trim()
+
+      if (ownerName) {
+        return {
+          owner_name: ownerName,
+          ...(ownerLocation ? { owner_location: ownerLocation } : {})
+        }
+      }
+    }
+
+    const locationStatement = /^j['’]?habite\s+(?:a|à)\s+(.+)$/i.exec(
+      utterance.trim()
+    )
+
+    if (locationStatement?.[1]) {
+      return {
+        owner_location: locationStatement[1]
+          .replace(/[.,!?]+$/, '')
+          .trim()
+      }
+    }
+
+    return null
+  }
+
+  private getDateForFrenchReference(
+    normalizedUtterance: string
+  ): string | null {
+    const date = new Date()
+    const relativeDays = normalizedUtterance.includes('apres-demain')
+      ? 2
+      : normalizedUtterance.includes('demain')
+        ? 1
+        : 0
+
+    if (relativeDays > 0) {
+      date.setDate(date.getDate() + relativeDays)
+      return date.toISOString().slice(0, 10)
+    }
+
+    const weekdays = [
+      'dimanche',
+      'lundi',
+      'mardi',
+      'mercredi',
+      'jeudi',
+      'vendredi',
+      'samedi'
+    ]
+    const targetDay = weekdays.findIndex((day) =>
+      normalizedUtterance.includes(day)
+    )
+
+    if (targetDay < 0) {
+      return null
+    }
+
+    const daysUntilTarget = (targetDay - date.getDay() + 7) % 7 || 7
+    date.setDate(date.getDate() + daysUntilTarget)
+    return date.toISOString().slice(0, 10)
+  }
+
+  private getAgendaArguments(
+    utterance: NLPUtterance
+  ): Record<string, string> | null {
+    const normalizedUtterance = this.normalizeFrenchUtterance(utterance)
+    const eventDate = this.getDateForFrenchReference(normalizedUtterance)
+
+    if (!eventDate) {
+      return null
+    }
+
+    const timeMatch = /\b(?:a|à)\s*(\d{1,2})(?:h(?:(\d{2}))?|:(\d{2}))?\b/i.exec(
+      utterance
+    )
+    const hour = timeMatch?.[1]
+    const minutes = timeMatch?.[2] || timeMatch?.[3] || '00'
+    const eventTime = hour
+      ? `${hour.padStart(2, '0')}:${minutes.padStart(2, '0')}`
+      : undefined
+    const eventTitle = utterance
+      .replace(
+        /^\s*(?:demain|après-demain|apres-demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s*/i,
+        ''
+      )
+      .replace(/^\s*(?:je\s+dois|il\s+faut\s+que|je\s+vais)\s+/i, '')
+      .replace(/[.!?]+$/, '')
+      .trim()
+
+    if (!eventTitle) {
+      return null
+    }
+
+    return {
+      event_title: eventTitle,
+      event_date: eventDate,
+      ...(eventTime ? { event_time: eventTime } : {})
+    }
+  }
+
   private async chooseSkill(utterance: NLPUtterance): Promise<NLPSkill | null> {
     LogHelper.title('NLU')
     LogHelper.info('Choosing skill...')
 
     try {
+      const deterministicSkill = this.getDeterministicSkill(utterance)
+      if (
+        deterministicSkill &&
+        SkillDomainHelper.getSkillDescriptorSync(deterministicSkill)
+      ) {
+        LogHelper.info(
+          `Deterministic intent match; selecting "${deterministicSkill}".`
+        )
+        return deterministicSkill
+      }
+
       // Force skill selection when only one is available
       const nativeSkillDescriptors = SkillDomainHelper.listSkillDescriptorsSync()
         .filter((descriptor) => descriptor.format === SkillFormat.LeonNative)
@@ -364,22 +538,27 @@ export default class NLU {
 
     try {
       if (skillName === 'introduction_skill') {
-        const normalizedUtterance = utterance
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[’]/g, '\'')
-          .toLowerCase()
-          .trim()
+        const normalizedUtterance = this.normalizeFrenchUtterance(utterance)
 
         if (
-          normalizedUtterance.includes('comment je m\'appelle') ||
+          normalizedUtterance.includes('comment je mapelle') ||
           normalizedUtterance.includes('quel est mon nom') ||
-          normalizedUtterance.includes('qui suis-je')
+          normalizedUtterance.includes('qui suis-je') ||
+          normalizedUtterance.includes('ou j\'habite')
         ) {
           return [{
             status: ActionCallingStatus.Success,
             name: 'get_owner',
             arguments: {}
+          }]
+        }
+
+        const ownerMemoryArguments = this.getOwnerMemoryArguments(utterance)
+        if (ownerMemoryArguments) {
+          return [{
+            status: ActionCallingStatus.Success,
+            name: 'remember',
+            arguments: ownerMemoryArguments
           }]
         }
 
@@ -415,7 +594,7 @@ export default class NLU {
         }
 
         const isRememberRequest =
-          normalizedUtterance.includes('je m\'appelle') ||
+          normalizedUtterance.includes('je mapelle') ||
           normalizedUtterance.includes('mon nom') ||
           normalizedUtterance.includes('date de naissance') ||
           normalizedUtterance.includes('je suis ne')
@@ -423,6 +602,19 @@ export default class NLU {
         if (!isRememberRequest) {
           return [{ status: ActionCallingStatus.NotFound }]
         }
+      }
+
+      if (skillName === 'personal_agenda_skill') {
+        const agendaArguments = this.getAgendaArguments(utterance)
+        if (agendaArguments) {
+          return [{
+            status: ActionCallingStatus.Success,
+            name: 'create_event',
+            arguments: agendaArguments
+          }]
+        }
+
+        return [{ status: ActionCallingStatus.NotFound }]
       }
 
       const workflowContext = {

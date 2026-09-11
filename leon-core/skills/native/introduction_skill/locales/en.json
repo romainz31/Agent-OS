@@ -25,6 +25,10 @@
         "remembered": [
           "I'm going to remember that {{ owner_name }}.",
           "Good to know a bit more about you {{ owner_name }}."
+        ],
+        "remembered_with_location": [
+          "I'll remember that your name is {{ owner_name }} and that you live in {{ owner_location }}.",
+          "Got it: {{ owner_name }}, you live in {{ owner_location }}."
         ]
       },
       "missing_param_follow_ups": {
@@ -42,6 +46,13 @@
         "owner_known": [
           "Your name is {{ owner_name }}.",
           "I have your name saved as {{ owner_name }}."
+        ],
+        "owner_known_with_location": [
+          "Your name is {{ owner_name }} and you live in {{ owner_location }}.",
+          "You are {{ owner_name }} and you live in {{ owner_location }}."
+        ],
+        "owner_location_known": [
+          "You live in {{ owner_location }}."
         ],
         "owner_unknown": [
           "I don't know your name yet."

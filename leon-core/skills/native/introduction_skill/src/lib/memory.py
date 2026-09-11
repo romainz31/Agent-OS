@@ -5,6 +5,7 @@ from typing import TypedDict, Union
 class Owner(TypedDict, total=False):
     name: str
     birth_date: str
+    location: str
     partner_name: str
 
 

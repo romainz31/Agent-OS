@@ -1,0 +1,32 @@
+{
+  "$schema": "../../../schemas/skill-schemas/skill.json",
+  "name": "Personal Agenda",
+  "icon_name": "calendar-event-line",
+  "bridge": "python",
+  "version": "1.0.0",
+  "description": "Save personal events and appointments with their dates.",
+  "author": {
+    "name": "Leon v2"
+  },
+  "actions": {
+    "create_event": {
+      "type": "logic",
+      "description": "Create a personal agenda event from an explicit plan, appointment, or activity with a date.",
+      "parameters": {
+        "event_title": {
+          "type": "string",
+          "description": "The event or task title."
+        },
+        "event_date": {
+          "type": "string",
+          "description": "The event date in ISO format YYYY-MM-DD."
+        },
+        "event_time": {
+          "type": "string",
+          "description": "The optional event time in 24-hour HH:MM format."
+        }
+      },
+      "optional_parameters": ["event_time"]
+    }
+  }
+}

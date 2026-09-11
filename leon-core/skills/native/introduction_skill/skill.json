@@ -26,9 +26,13 @@
         "owner_birth_date": {
           "type": "string",
           "description": "The owner's birth date as an ISO date or precise date string."
+        },
+        "owner_location": {
+          "type": "string",
+          "description": "The owner's town or home location."
         }
       },
-      "optional_parameters": ["owner_birth_date"]
+      "optional_parameters": ["owner_name", "owner_birth_date", "owner_location"]
     },
     "get_owner": {
       "type": "logic",
