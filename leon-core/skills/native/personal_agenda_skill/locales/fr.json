@@ -7,7 +7,9 @@
           "C'est noté pour le {{ date }} : {{ title }}{{ time_suffix }}.",
           "D'accord, j'ajoute à ton agenda du {{ date }} : {{ title }}{{ time_suffix }}."
         ],
-        "event_missing": "Il me manque le titre ou la date de l'événement."
+        "event_missing": [
+          "Il me manque le titre ou la date de l'événement."
+        ]
       }
     },
     "create_task": {
@@ -16,7 +18,9 @@
           "C'est noté : {{ titles }}{{ date_suffix }}.",
           "J'ai ajouté {{ count }} tâche(s) : {{ titles }}{{ date_suffix }}."
         ],
-        "task_missing": "Je n'ai pas trouvé la tâche à ajouter."
+        "task_missing": [
+          "Je n'ai pas trouvé la tâche à ajouter."
+        ]
       }
     }
   }
