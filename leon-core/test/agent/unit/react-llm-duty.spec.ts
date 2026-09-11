@@ -213,6 +213,7 @@ describe('continuous agent loop', () => {
 
     expect(result.answer).toBe('C’est enregistré dans ma mémoire.')
     expect(callModel).toHaveBeenCalledTimes(2)
+    expect(callModel.mock.calls[0]?.[2]).toMatchObject({ requiresToolAction: true })
     expect(callModel.mock.calls[1]?.[2]).toMatchObject({ isStructuredMemoryTurn: true })
     expect(callModel.mock.calls.some((call) => call[2]?.isCompletionReview)).toBe(false)
   })
@@ -1655,6 +1656,38 @@ describe('continuous agent loop', () => {
         'What is the weather like in Shenzhen?'
       )
     ).toBe('weather')
+  })
+
+  it('preloads Paul for French personal activities and exact history questions', () => {
+    coreMocks.getFlattenedTools.mockReturnValue([
+      {
+        toolkitId: 'personal_assistant',
+        toolkitName: 'Personal Assistant',
+        toolkitDescription: 'Paul personal memory and journal.',
+        toolId: 'paul',
+        toolName: 'Paul',
+        toolDescription: 'Record and query personal data.'
+      },
+      {
+        toolkitId: 'structured_knowledge',
+        toolkitName: 'Structured Knowledge',
+        toolkitDescription: 'Read generated context files.',
+        toolId: 'context',
+        toolName: 'Context',
+        toolDescription: 'Search context.'
+      }
+    ])
+
+    expect(
+      findHighConfidenceAgentToolkitId(
+        'hier j’ai nettoyé la machine à café, la fontaine à chat et les toilettes'
+      )
+    ).toBe('personal_assistant')
+    expect(
+      findHighConfidenceAgentToolkitId(
+        'quand est-ce que j’ai nettoyé les toilettes pour la dernière fois ?'
+      )
+    ).toBe('personal_assistant')
   })
 
   it('keeps model-led discovery when registry metadata is ambiguous', () => {
