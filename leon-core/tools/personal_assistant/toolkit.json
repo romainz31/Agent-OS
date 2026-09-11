@@ -2,7 +2,7 @@
   "$schema": "../../schemas/toolkit-schemas/toolkit.json",
   "name": "Personal Assistant",
   "description": "Paul's structured personal memory, journal, agenda and life tracking tools.",
-  "progressive_guidance": "Use Paul for durable personal facts, relationships, dated agenda items, completed activities, counts, mood and habits. Do not guess exact dates or counts from chat history when Paul can query them.",
+  "progressive_guidance": "Paul is the mandatory source of truth for Romain's personal life data. When the owner states a completed action (for example: 'hier j'ai nettoyé la machine à café, la fontaine à chat et les toilettes'), call Paul.recordActivity immediately: record every distinct activity separately, resolve hier/aujourd'hui/demain yourself through occurredAt, and do not answer as if it was saved until the tool returns success. Use Paul.queryActivities for questions such as 'quand est-ce que j'ai nettoyé les toilettes pour la dernière fois ?', Paul.countActivities for exact counts, and Paul.getProgram for agenda. Never use Structured Knowledge, Context Search, OWNER.md or saveFact to store/query a completed activity. Never claim an activity is recorded without a successful Paul tool result.",
   "icon_name": "heart-3-line",
   "context_files": [
     "OWNER.md",
