@@ -8,6 +8,7 @@ import Client from './client'
 import { BuiltInCommands } from './built-in-commands'
 import FileSystemAutocomplete from './file-system-autocomplete'
 import SessionsPanel from './sessions'
+import PaulDashboard from './paul-dashboard'
 import { ensureProfileAuthentication } from './profile-auth'
 // import Recorder from './recorder'
 // import listener from './listener'
@@ -70,6 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         })
       }
     })
+    const paulDashboard = new PaulDashboard({ serverUrl })
     // let rec = {}
     // let chunks = []
 
@@ -98,6 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     client.updateMood(window.leonConfigInfo.mood)
     client.setSessionPanel(sessionsPanel)
     sessionsPanel.init()
+    paulDashboard.init()
     client.init()
     fileSystemAutocomplete.attach(input)
     builtInCommands.init()
