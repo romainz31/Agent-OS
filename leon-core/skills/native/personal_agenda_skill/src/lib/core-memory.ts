@@ -11,7 +11,9 @@ export async function saveAgendaEvent(input: {
     scope: 'persistent',
     kind: 'event',
     title: input.title,
-    content: `Événement : ${input.title}`,
+    content: `Événement : ${input.title} — ${input.date}${
+      input.time ? ` à ${input.time}` : ''
+    }`,
     sourceType: 'explicit_user',
     importance: 0.85,
     confidence: 0.95,
@@ -33,7 +35,7 @@ export async function saveTask(input: {
     scope: 'persistent',
     kind: 'task',
     title: input.title,
-    content: `Tâche : ${input.title}`,
+    content: `Tâche : ${input.title}${input.date ? ` — ${input.date}` : ''}`,
     sourceType: 'explicit_user',
     importance: 0.8,
     confidence: 0.95,
